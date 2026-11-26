@@ -126,6 +126,25 @@ class DownloadManagerTest {
     }
 
     @Test
+    void interruptedTasksResumeOnStartWhenEnabled() throws Exception {
+        Path state = dir.resolve("state");
+        server.chunkDelayMillis = 20;
+        manager = new DownloadManager(options().stateDir(state).connections(2));
+        TaskSnapshot running = enqueue("/file", "d.bin", Map.of());
+        await(running.id(), s -> s.downloaded() > 150 * 1024);
+        TaskSnapshot paused = enqueue("/file", "e.bin", Map.of());
+        manager.pause(paused.id());
+        awaitStatus(paused.id(), TaskStatus.PAUSED);
+        manager.close();
+
+        server.chunkDelayMillis = 0;
+        manager = new DownloadManager(options().stateDir(state).resumeOnStart(true));
+        TaskSnapshot done = awaitStatus(running.id(), TaskStatus.COMPLETED);
+        assertArrayEquals(TestServer.content(1), Files.readAllBytes(Path.of(done.destination())));
+        assertEquals(TaskStatus.PAUSED, manager.get(paused.id()).orElseThrow().status(), "user pauses must survive restarts");
+    }
+
+    @Test
     void serverWithoutRangeRestartsFromZero() throws Exception {
         server.chunkDelayMillis = 10;
         manager = new DownloadManager(options());

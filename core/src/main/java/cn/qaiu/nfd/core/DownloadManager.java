@@ -242,8 +242,10 @@ public final class DownloadManager implements AutoCloseable {
         segmentPool.shutdownNow();
         synchronized (lock) {
             for (Task task : tasks.values()) {
-                if (task.status.active()) {
-                    task.status = TaskStatus.PAUSED;
+                // Tasks interrupted by shutdown stay QUEUED on disk, so restore() can apply resumeOnStart.
+                if (task.status.active() || running.contains(task) && task.status == TaskStatus.PAUSED) {
+                    task.status = TaskStatus.QUEUED;
+                    task.message = "";
                 }
                 persist(task);
             }
