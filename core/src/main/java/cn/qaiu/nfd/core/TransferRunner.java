@@ -129,6 +129,24 @@ final class TransferRunner {
                         if (++failures > options.maxRetries) {
                             return fail(failure.getMessage() + "（已重试 " + options.maxRetries + " 次）");
                         }
+                        // Signed CDN URLs can get stuck on a bad edge node; a freshly resolved URL
+                        // often lands elsewhere, so every second fruitless retry re-resolves first.
+                        if (!progressed && failures % 2 == 0 && options.refresher != null
+                                && refreshes < MAX_REFRESHES && task.source != null && !task.source.isEmpty()) {
+                            refreshes++;
+                            manager.update(task, failure.getMessage() + "，正在重新获取下载地址…");
+                            try {
+                                LinkRefresher.ResolvedLink link = options.refresher.refresh(task.snapshot());
+                                if (link != null && link.url() != null && !link.url().isBlank()) {
+                                    task.url = link.url();
+                                    task.headers = link.headers();
+                                }
+                            } catch (Exception ex) {
+                                if (stopRequested()) {
+                                    return TaskStatus.PAUSED;
+                                }
+                            }
+                        }
                         long delay = Math.min(options.retryBaseMillis << Math.min(failures - 1, 5), 30_000L);
                         manager.update(task, String.format(Locale.ROOT, "%s，%d 秒后第 %d 次重试",
                                 failure.getMessage(), Math.max(1, delay / 1000), failures));

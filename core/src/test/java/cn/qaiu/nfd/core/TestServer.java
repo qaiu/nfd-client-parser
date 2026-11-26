@@ -35,6 +35,7 @@ final class TestServer implements AutoCloseable {
         server.createContext("/norange", ex -> serve(ex, false));
         server.createContext("/expired", ex -> status(ex, 403));
         server.createContext("/gone", ex -> status(ex, 410));
+        server.createContext("/stuck", ex -> status(ex, 503));
         server.createContext("/redirect", ex -> {
             ex.getResponseHeaders().add("Location", "/file");
             status(ex, 302);

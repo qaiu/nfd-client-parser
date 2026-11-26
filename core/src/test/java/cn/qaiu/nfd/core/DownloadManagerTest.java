@@ -236,6 +236,18 @@ class DownloadManagerTest {
     }
 
     @Test
+    void repeatedTransientFailuresReResolveTheLink() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        manager = new DownloadManager(options().maxRetries(4).refresher(task -> {
+            calls.incrementAndGet();
+            return new LinkRefresher.ResolvedLink(server.url("/file"), Map.of());
+        }));
+        TaskSnapshot task = enqueue("/stuck", "s.bin", Map.of("link", "share"));
+        assertContent(awaitStatus(task.id(), TaskStatus.COMPLETED), 1);
+        assertEquals(1, calls.get());
+    }
+
+    @Test
     void followsRedirects() throws Exception {
         manager = new DownloadManager(options());
         TaskSnapshot task = enqueue("/redirect", "k.bin", Map.of());
