@@ -16,7 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Local share-link session on top of {@code cn.qaiu:parser} / {@code parser-android}.
+ * Local share-link session on top of {@code cn.qaiu:parser}.
  *
  * <p>Listing uses {@code parseFileList}. A file row's {@code parserUrl} carries the same
  * {@code /v2/redirectUrl/{type}/{param}} token the parser itself emits. Resolving a file
@@ -25,6 +25,11 @@ import java.util.Map;
  * come back on the share link, so the downloader does not call a hosted NFD service.
  */
 public final class ShareSession {
+
+    /** Keys of the source map stored with a download so an expired link can be re-resolved. */
+    public static final String SOURCE_LINK = "link";
+    public static final String SOURCE_PASSWORD = "password";
+    public static final String SOURCE_ENTRY = "entry";
 
     private static final String REDIRECT_MARKER = "/v2/redirectUrl/";
     private static final String NOT_IMPLEMENTED = "Not implemented yet";
@@ -60,6 +65,7 @@ public final class ShareSession {
     }
 
     public synchronized Listing list(String dirId) {
+        ParserRuntime.start();
         Map<String, Object> other = otherParam();
         if (dirId == null || dirId.isBlank()) {
             other.remove("dirId");
@@ -112,6 +118,7 @@ public final class ShareSession {
     }
 
     public synchronized DirectLink resolve(Entry entry) {
+        ParserRuntime.start();
         String fallbackName = entry == null || entry.fileName() == null || entry.fileName().isBlank()
                 ? "download"
                 : entry.fileName();
@@ -150,6 +157,7 @@ public final class ShareSession {
     }
 
     public synchronized DirectLink parseDirect() {
+        ParserRuntime.start();
         IPanTool tool = created.createTool();
         try {
             String url = tool.parseSync();
@@ -352,7 +360,7 @@ public final class ShareSession {
             try {
                 closeable.close();
             } catch (Exception ignored) {
-                // The Android parser build does not implement AutoCloseable.
+                // Closing only releases the per-call web client.
             }
         }
     }
@@ -394,6 +402,53 @@ public final class ShareSession {
             String sizeText,
             String parserUrl,
             boolean folder) {
+
+        public JsonObject toJson() {
+            return new JsonObject()
+                    .put("fileName", fileName)
+                    .put("fileId", fileId)
+                    .put("fileType", fileType)
+                    .put("size", size)
+                    .put("sizeText", sizeText)
+                    .put("parserUrl", parserUrl)
+                    .put("folder", folder);
+        }
+
+        public static Entry fromJson(JsonObject json) {
+            if (json == null) {
+                return null;
+            }
+            Object size = json.getValue("size");
+            return new Entry(
+                    json.getString("fileName", ""),
+                    json.getString("fileId", ""),
+                    json.getString("fileType", ""),
+                    size instanceof Number number ? number.longValue() : -1L,
+                    json.getString("sizeText", ""),
+                    json.getString("parserUrl"),
+                    json.getBoolean("folder", false));
+        }
+    }
+
+    /** Source map for {@code cn.qaiu.nfd.core.DownloadRequest#source}. */
+    public static Map<String, String> source(String link, String password, Entry entry) {
+        Map<String, String> source = new LinkedHashMap<>();
+        source.put(SOURCE_LINK, link == null ? "" : link);
+        if (password != null && !password.isBlank()) {
+            source.put(SOURCE_PASSWORD, password.trim());
+        }
+        if (entry != null) {
+            source.put(SOURCE_ENTRY, entry.toJson().encode());
+        }
+        return source;
+    }
+
+    /** Re-resolves a download from its {@link #source} map. */
+    public static DirectLink resolveSource(Map<String, String> source) {
+        ShareSession session = open(source.get(SOURCE_LINK), source.get(SOURCE_PASSWORD));
+        String raw = source.get(SOURCE_ENTRY);
+        Entry entry = raw == null || raw.isBlank() ? null : Entry.fromJson(new JsonObject(raw));
+        return entry == null ? session.parseDirect() : session.resolve(entry);
     }
 
     public record DirectLink(String url, String fileName, Map<String, String> headers) {

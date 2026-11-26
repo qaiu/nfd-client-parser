@@ -75,4 +75,27 @@ class ShareSessionTest {
     void rejectsAnEmptyLink() {
         assertThrows(IllegalArgumentException.class, () -> ShareSession.open("  ", null));
     }
+
+    @Test
+    void entryAndSourceRoundTrip() {
+        ShareSession.Entry entry = new ShareSession.Entry("a.zip", "1", "zip", 10, "10 B", "/v2/redirectUrl/lz/xyz", false);
+        assertEquals(entry, ShareSession.Entry.fromJson(entry.toJson()));
+        var source = ShareSession.source("https://pan.example/s/1", " 1234 ", entry);
+        assertEquals("1234", source.get(ShareSession.SOURCE_PASSWORD));
+        assertEquals(entry, ShareSession.Entry.fromJson(new io.vertx.core.json.JsonObject(source.get(ShareSession.SOURCE_ENTRY))));
+        assertFalse(ShareSession.source("x", "", null).containsKey(ShareSession.SOURCE_PASSWORD));
+    }
+
+    @Test
+    void friendlyErrors() {
+        RuntimeException gone = new RuntimeException("夸克网盘-qk: url=x - 解析异常: token 返回异常: {\"status\":404,\"message\":\"分享不存在\"}");
+        assertEquals("分享已失效：分享不存在", ShareErrors.friendly(new RuntimeException(gone)));
+        assertEquals("暂不支持该分享链接", ShareErrors.friendly(new IllegalArgumentException("Unsupported share URL")));
+        assertEquals("网络不可用或无法解析网盘域名",
+                ShareErrors.friendly(new RuntimeException(new java.net.UnknownHostException("pan.quark.cn"))));
+        assertEquals("解析超时，网盘服务器响应过慢，请稍后重试",
+                ShareErrors.friendly(new RuntimeException(new java.util.concurrent.TimeoutException())));
+        assertTrue(ShareErrors.friendly(new RuntimeException("密码错误")).startsWith("提取码错误"));
+        assertEquals("解析失败：boom", ShareErrors.friendly(new IllegalStateException("boom")));
+    }
 }
