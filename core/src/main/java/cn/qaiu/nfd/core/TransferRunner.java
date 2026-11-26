@@ -160,6 +160,13 @@ final class TransferRunner {
                         return fail(failure.getMessage());
                     }
                 }
+            } catch (RuntimeException ex) {
+                // Pausing disconnects in-flight connections from another thread, and
+                // HttpURLConnection can then throw unchecked exceptions (e.g. an NPE in connect).
+                if (stopRequested()) {
+                    return TaskStatus.PAUSED;
+                }
+                throw ex;
             }
         }
     }
