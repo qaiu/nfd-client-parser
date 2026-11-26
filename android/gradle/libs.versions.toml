@@ -1,0 +1,12 @@
+[versions]
+# parser-android 10.2.6 is not published on Maven Central.
+# Checked 2026-11-26: https://repo1.maven.org/maven2/cn/qaiu/parser-android/ stops at 10.2.5.
+# Bump this single pin when 10.2.6 (or newer) can be resolved. Do not republish the artifact.
+parserAndroid = "10.2.5"
+agp = "8.9.1"
+kotlin = "2.1.21"
+okhttp = "5.2.0"
+
+[libraries]
+parser-android = { module = "cn.qaiu:parser-android", version.ref = "parserAndroid" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
