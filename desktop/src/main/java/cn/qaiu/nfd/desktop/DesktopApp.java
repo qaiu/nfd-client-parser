@@ -3,6 +3,8 @@ package cn.qaiu.nfd.desktop;
 import cn.qaiu.nfd.core.DownloadManager;
 import cn.qaiu.nfd.core.DownloadRequest;
 import cn.qaiu.nfd.core.LinkRefresher;
+import cn.qaiu.nfd.share.AuthStore;
+import cn.qaiu.nfd.share.ParseHistory;
 import cn.qaiu.nfd.share.ParserRuntime;
 import cn.qaiu.nfd.share.ShareErrors;
 import cn.qaiu.nfd.share.ShareSession;
@@ -41,6 +43,8 @@ public final class DesktopApp extends Application {
         return thread;
     });
     private final Settings settings = Settings.load();
+    private final AuthStore auths = AuthStore.load(AppPaths.dataDir().resolve("auths.json"));
+    private final ParseHistory history = new ParseHistory(AppPaths.dataDir().resolve("history.json"));
     private DownloadManager manager;
     private BrowsePane browse;
     private TasksPane tasks;
@@ -49,6 +53,7 @@ public final class DesktopApp extends Application {
 
     @Override
     public void init() {
+        ShareSession.useCredentials(auths::get);
         manager = new DownloadManager(new DownloadManager.Options()
                 .stateDir(AppPaths.taskStateDir())
                 .maxConcurrent(settings.maxConcurrent())
@@ -61,14 +66,17 @@ public final class DesktopApp extends Application {
     @Override
     public void start(Stage stage) {
         status = new Ui.StatusBar("v" + Main.version() + "  ·  parser " + ParserRuntime.parserVersion());
-        browse = new BrowsePane(io, this::enqueue, settings::downloadDir, status);
+        browse = new BrowsePane(io, this::enqueue, settings::downloadDir, status, history);
         tasks = new TasksPane(manager, settings::downloadDir, status);
 
         Label title = Ui.label("网盘直链下载", "title");
         Label subtitle = Ui.label("粘贴分享链接 → 选择文件 → 多线程下载，支持暂停、断点续传和链接过期自动续期", "muted");
         HBox header = Ui.row(12, new VBox(2, title, subtitle), Ui.spacer(),
-                Ui.button("设置", "下载目录、并发和连接数", () -> {
-                    if (SettingsDialog.show(stage, settings, manager)) {
+                Ui.button("历史记录", "查看解析过的链接并重新解析", () ->
+                        HistoryDialog.show(stage, history, item -> browse.reparse(item.link(), item.password()), status)),
+                Ui.button("设置", "下载目录、并发、连接数和网盘账号", () -> {
+                    if (SettingsDialog.show(stage, settings, manager, auths,
+                            () -> status.info("网盘登录信息已更新，重新解析后生效"))) {
                         status.info("设置已保存，下载目录：" + settings.downloadDir());
                     }
                 }));

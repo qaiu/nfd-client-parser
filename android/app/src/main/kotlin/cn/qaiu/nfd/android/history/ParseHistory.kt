@@ -110,7 +110,7 @@ class ParseHistory(private val file: File, private val limit: Int = 100) {
     fun update(link: String, password: String, listing: Listing): List<HistoryItem> {
         val key = normalize(link)
         val existing = items().firstOrNull { normalize(it.link) == key } ?: return items()
-        val refreshed = HistoryItem.succeeded(link, password, listing, existing.time)
+        val refreshed = HistoryItem.succeeded(existing.link, existing.password, listing, existing.time)
         val updated = items().map { if (normalize(it.link) == key) refreshed else it }
         save(updated)
         return updated

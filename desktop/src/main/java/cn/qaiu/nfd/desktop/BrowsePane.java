@@ -1,6 +1,7 @@
 package cn.qaiu.nfd.desktop;
 
 import cn.qaiu.nfd.core.DownloadRequest;
+import cn.qaiu.nfd.share.ParseHistory;
 import cn.qaiu.nfd.share.ShareErrors;
 import cn.qaiu.nfd.share.ShareSession;
 import javafx.application.Platform;
@@ -26,10 +27,13 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -41,6 +45,7 @@ final class BrowsePane extends VBox {
     private final Consumer<List<DownloadRequest>> enqueue;
     private final Supplier<Path> downloadDir;
     private final Ui.StatusBar status;
+    private final ParseHistory history;
 
     private final TextField linkField = new TextField();
     private final PasswordField passwordField = new PasswordField();
@@ -54,6 +59,8 @@ final class BrowsePane extends VBox {
     private final Button upButton;
     private final Button selectedButton;
     private final Button allButton;
+    private final Button moreButton;
+    private final Label noteLabel = Ui.label("", "muted");
 
     /** Every navigation bumps the generation, so a slow response for an older request is dropped. */
     private int generation;
@@ -63,12 +70,13 @@ final class BrowsePane extends VBox {
     private final List<Level> levels = new ArrayList<>();
 
     BrowsePane(ExecutorService io, Consumer<List<DownloadRequest>> enqueue, Supplier<Path> downloadDir,
-               Ui.StatusBar status) {
+               Ui.StatusBar status, ParseHistory history) {
         super(10);
         this.io = io;
         this.enqueue = enqueue;
         this.downloadDir = downloadDir;
         this.status = status;
+        this.history = history;
 
         linkField.setPromptText("粘贴分享链接或整段分享文本，回车解析");
         linkField.setTooltip(new Tooltip("解析在本机完成，链接不会提交给任何托管服务"));
@@ -91,12 +99,18 @@ final class BrowsePane extends VBox {
         configureTable();
         selectedButton = Ui.accent(Ui.button("下载所选", "Ctrl/Shift 可多选", this::downloadSelected));
         allButton = Ui.button("全部下载", "下载当前目录里的全部文件（不含子文件夹）", this::downloadAll);
+        moreButton = Ui.button("加载更多", "这个目录还有更多文件，获取下一页", this::loadMore);
+        moreButton.setVisible(false);
+        moreButton.managedProperty().bind(moreButton.visibleProperty());
         Label hint = Ui.label("双击文件夹进入，双击文件下载", "muted");
-        HBox actions = Ui.row(8, hint, Ui.spacer(), allButton, selectedButton);
+        HBox actions = Ui.row(8, hint, Ui.spacer(), moreButton, allButton, selectedButton);
         updateButtons();
 
+        noteLabel.setWrapText(true);
+        noteLabel.managedProperty().bind(noteLabel.visibleProperty());
+        noteLabel.setVisible(false);
         VBox.setVgrow(table, Priority.ALWAYS);
-        getChildren().addAll(input, nav, table, actions);
+        getChildren().addAll(input, nav, noteLabel, table, actions);
         getStyleClass().add("card");
     }
 
@@ -127,8 +141,16 @@ final class BrowsePane extends VBox {
         }
         String finalPwd = pwd;
         run("正在解析…", () -> {
-            ShareSession opened = ShareSession.open(url, finalPwd);
-            ShareSession.Listing listing = opened.list(null);
+            ShareSession.Listing listing;
+            ShareSession opened;
+            try {
+                opened = ShareSession.open(url, finalPwd);
+                listing = opened.browse();
+            } catch (RuntimeException ex) {
+                remember(ParseHistory.Item.failed(url, finalPwd, ShareErrors.friendly(ex), System.currentTimeMillis()));
+                throw ex;
+            }
+            remember(ParseHistory.Item.succeeded(url, finalPwd, listing, System.currentTimeMillis()));
             return () -> {
                 session = opened;
                 link = url;
@@ -138,6 +160,73 @@ final class BrowsePane extends VBox {
                 show();
             };
         });
+    }
+
+    /** Fills in a link from the history and parses it again. */
+    void reparse(String historyLink, String historyPassword) {
+        linkField.setText(historyLink);
+        passwordField.setText(historyPassword == null ? "" : historyPassword);
+        parse();
+    }
+
+    private void loadMore() {
+        if (session == null || levels.isEmpty()) {
+            return;
+        }
+        ShareSession current = session;
+        Level level = levels.get(levels.size() - 1);
+        ShareSession.Listing shown = level.listing;
+        if (!shown.hasMore()) {
+            return;
+        }
+        boolean root = levels.size() == 1;
+        String shareLink = link;
+        String sharePassword = password;
+        run("正在加载第 " + (shown.page() + 1) + " 页…", () -> {
+            ShareSession.Listing next = level.folder == null
+                    ? current.list(null, shown.page() + 1, shown.nextCursor())
+                    : current.openFolder(level.folder, shown.page() + 1, shown.nextCursor());
+            ShareSession.Listing merged = append(shown, next);
+            if (root) {
+                try {
+                    history.update(shareLink, sharePassword, merged);
+                } catch (IOException ignored) {
+                    // History is a convenience; a read-only data dir must not break browsing.
+                }
+            }
+            return () -> {
+                levels.set(levels.size() - 1, new Level(level.label, merged, level.folder));
+                int keep = table.getItems().size();
+                show();
+                table.scrollTo(Math.max(0, keep - 1));
+            };
+        });
+    }
+
+    private static ShareSession.Listing append(ShareSession.Listing shown, ShareSession.Listing next) {
+        List<ShareSession.Entry> rows = new ArrayList<>(shown.entries());
+        Set<String> known = new HashSet<>();
+        rows.forEach(entry -> known.add(key(entry)));
+        for (ShareSession.Entry entry : next.entries()) {
+            if (known.add(key(entry))) {
+                rows.add(entry);
+            }
+        }
+        return new ShareSession.Listing(shown.panName(), shown.type(), rows, next.page(), next.hasMore(),
+                next.nextCursor(), shown.singleFile(), shown.note());
+    }
+
+    private static String key(ShareSession.Entry entry) {
+        return entry.parserUrl() != null && !entry.parserUrl().isBlank()
+                ? entry.parserUrl() : entry.fileId() + "/" + entry.fileName();
+    }
+
+    private void remember(ParseHistory.Item item) {
+        try {
+            history.record(item);
+        } catch (IOException ignored) {
+            // History is a convenience; a read-only data dir must not break parsing.
+        }
     }
 
     private void open(ShareSession.Entry folder) {
@@ -159,7 +248,9 @@ final class BrowsePane extends VBox {
         ShareSession current = session;
         Level level = levels.get(levels.size() - 1);
         run("正在刷新…", () -> {
-            ShareSession.Listing listing = level.folder == null ? current.list(null) : current.openFolder(level.folder);
+            ShareSession.Listing listing = level.folder == null
+                    ? (levels.size() == 1 ? current.browse() : current.list(null))
+                    : current.openFolder(level.folder);
             return () -> {
                 levels.set(levels.size() - 1, new Level(level.label, listing, level.folder));
                 show();
@@ -189,6 +280,11 @@ final class BrowsePane extends VBox {
         entries.setAll(level.listing.entries());
         table.getSelectionModel().clearSelection();
         table.scrollTo(0);
+        String note = level.listing.note();
+        noteLabel.setText(note == null ? "" : note);
+        noteLabel.setVisible(note != null && !note.isBlank());
+        moreButton.setVisible(level.listing.hasMore());
+        moreButton.setText("加载更多（已加载 " + level.listing.entries().size() + " 项）");
         panLabel.setText(level.listing.panName() == null ? "" : level.listing.panName());
         crumbs.getChildren().clear();
         for (int i = 0; i < levels.size(); i++) {
@@ -207,7 +303,8 @@ final class BrowsePane extends VBox {
         upButton.setDisable(levels.size() <= 1);
         long files = level.listing.entries().stream().filter(entry -> !entry.folder()).count();
         long folders = level.listing.entries().size() - files;
-        status.info(level.label + "：" + files + " 个文件" + (folders > 0 ? "，" + folders + " 个文件夹" : ""));
+        status.info(level.label + "：" + files + " 个文件" + (folders > 0 ? "，" + folders + " 个文件夹" : "")
+                + (level.listing.hasMore() ? "（还有更多，点“加载更多”）" : ""));
         updateButtons();
     }
 
@@ -252,7 +349,16 @@ final class BrowsePane extends VBox {
                 ? ShareSession.extractPassword(raw) : passwordField.getText().trim();
         Path dir = downloadDir.get();
         run("正在解析下载地址…", () -> {
-            ShareSession.DirectLink direct = ShareSession.open(url, pwd).parseDirect();
+            ShareSession.DirectLink direct;
+            try {
+                direct = ShareSession.open(url, pwd).parseDirect();
+            } catch (RuntimeException ex) {
+                remember(ParseHistory.Item.failed(url, pwd, ShareErrors.friendly(ex), System.currentTimeMillis()));
+                throw ex;
+            }
+            String name = direct.fileName() == null || direct.fileName().isBlank() ? url : direct.fileName();
+            remember(new ParseHistory.Item(url, pwd, System.currentTimeMillis(), true, "", "", name, 1, 0, 0, false,
+                    false, true, ""));
             return () -> {
                 enqueue.accept(List.of(new DownloadRequest(direct.fileName(), direct.url(), direct.headers(), dir,
                         ShareSession.source(url, pwd, null))));
