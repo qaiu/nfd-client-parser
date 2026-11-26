@@ -229,6 +229,7 @@ jobs:
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      APK_SIGNED: ${{ secrets.NFD_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
@@ -245,9 +246,12 @@ jobs:
 
           - Android：按 CPU 选择 \`nfd-android-$VERSION-<abi>.apk\`，不确定就装 \`universal\`。解析与下载由 Termux 中的守护进程完成，首次使用请在 App 的「连接」页按提示安装。
           - Termux 守护进程：\`nfd-termux-daemon-$VERSION.tar.gz\`（App 内已内置，单独下载仅用于手动安装）。
-          - 桌面：\`NFDClient-$VERSION-<os>-<arch>\`，自带 Java 运行时，无需另装 Java。macOS 包未签名，Windows 包未签名。
+          - 桌面：\`NFDClient-$VERSION-<os>-<arch>\`，自带 Java 运行时，无需另装 Java。macOS 包未签名，Windows 包未签名。Windows on Arm 请使用 windows-x64 包（系统以 x64 仿真运行）。
           - 校验：\`SHA256SUMS.txt\`。
           EOF
+          if [ "$APK_SIGNED" != true ]; then
+            echo "- 注意：本次 APK 使用调试签名（仓库未配置签名密钥），仅供测试，以后换成正式签名的版本需要先卸载再安装。" >> ../notes.md
+          fi
       - name: Publish
         run: |
           flags=()

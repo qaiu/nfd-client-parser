@@ -64,8 +64,8 @@ CI 实际构建并测试的矩阵：
 | --- | --- | --- | --- | --- |
 | Android | arm64-v8a | APK（按 ABI 拆分） | ubuntu-latest | 单元测试；APK 签名校验；内置守护进程包完整；只含 arm64 本地库 |
 | Android | armeabi-v7a、x86_64、x86、universal | APK | ubuntu-latest | 同上 |
-| Termux | aarch64 | 守护进程 tar.gz | ubuntu-24.04-arm + `termux/termux-docker:aarch64` | `pkg` 安装 openjdk-21 → `install.sh` → `nfd-termux self-test` → 启动守护进程并调用 API |
-| Termux | x86_64 | 同一个 tar.gz | ubuntu-latest + `termux/termux-docker:x86_64` | 同上；另跑一次在线列目录（依赖网络，失败不阻断） |
+| Termux | aarch64 | 守护进程 tar.gz | ubuntu-24.04-arm + `termux/termux-docker:aarch64` | `pkg` 安装 openjdk-21 → `install.sh` → `nfd-termux self-test` → 启动守护进程并调用 API；另跑一次在线列目录（依赖网络，失败不阻断） |
+| Termux | x86_64 | 同一个 tar.gz | ubuntu-latest + `termux/termux-docker:x86_64` | 同上 |
 | Windows | x64 | zip（便携）、msi | windows-latest | 打包前后各跑一次 `--self-test`（解析库、GBK、TLS、Nashorn、Vert.x、本地下载） |
 | Windows | arm64 | 使用 x64 包 | windows-11-arm | 在 x64 仿真下运行 x64 包的 `--self-test`（不阻断） |
 | Linux | x64 | tar.gz、deb | ubuntu-22.04 | `--self-test` |
