@@ -5,4 +5,4 @@ exec java \
   --add-modules javafx.controls \
   --enable-native-access=javafx.graphics \
   -cp "nfd-desktop.jar:lib/*" \
-  cn.qaiu.nfd.desktop.DesktopApp "$@"
+  cn.qaiu.nfd.desktop.Main "$@"
