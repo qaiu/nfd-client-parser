@@ -59,12 +59,47 @@ data class Entry(
     }
 }
 
-data class Listing(val panName: String, val type: String, val entries: List<Entry>) {
+/**
+ * One or more pages of a folder. [singleFile] means the folder API did not apply and the daemon
+ * parsed the share as one file; [note] says why.
+ */
+data class Listing(
+    val panName: String,
+    val type: String,
+    val entries: List<Entry>,
+    val page: Int = 1,
+    val hasMore: Boolean = false,
+    val nextCursor: String? = null,
+    val singleFile: Boolean = false,
+    val note: String = "",
+) {
+    val files: List<Entry> get() = entries.filterNot { it.folder }
+    val folders: Int get() = entries.count { it.folder }
+    /** Sum of known file sizes; [sizeComplete] is false when some file has no size. */
+    val totalSize: Long get() = files.filter { it.size >= 0 }.sumOf { it.size }
+    val sizeComplete: Boolean get() = files.all { it.size >= 0 }
+
+    /** Appends the next page, skipping rows the provider repeats across page boundaries. */
+    fun append(next: Listing): Listing {
+        val known = entries.mapTo(HashSet()) { it.key }
+        return copy(
+            entries = entries + next.entries.filterNot { it.key in known },
+            page = next.page,
+            hasMore = next.hasMore,
+            nextCursor = next.nextCursor,
+        )
+    }
+
     companion object {
         fun from(json: JSONObject) = Listing(
             panName = json.optString("panName"),
             type = json.optString("type"),
             entries = json.optJSONArray("entries").objects().map(Entry::from),
+            page = json.optInt("page", 1),
+            hasMore = json.optBoolean("hasMore"),
+            nextCursor = if (json.isNull("nextCursor")) null else json.optString("nextCursor").ifBlank { null },
+            singleFile = json.optBoolean("singleFile"),
+            note = json.optString("note"),
         )
     }
 }
@@ -109,14 +144,60 @@ data class Task(
     }
 }
 
-data class DaemonSettings(val maxConcurrent: Int, val connections: Int, val downloadDir: String, val downloadDirShared: Boolean) {
+data class DaemonSettings(
+    val maxConcurrent: Int,
+    val connections: Int,
+    val downloadDir: String,
+    val downloadDirShared: Boolean,
+    val downloadDirCustom: Boolean = false,
+    val defaultDownloadDir: String = "",
+) {
     companion object {
         fun from(json: JSONObject) = DaemonSettings(
             maxConcurrent = json.optInt("maxConcurrent", 3),
             connections = json.optInt("connections", 4),
             downloadDir = json.optString("downloadDir"),
             downloadDirShared = json.optBoolean("downloadDirShared"),
+            downloadDirCustom = json.optBoolean("downloadDirCustom"),
+            defaultDownloadDir = json.optString("defaultDownloadDir"),
         )
+    }
+}
+
+/** A login field the parser understands; secret values are never sent back by the daemon. */
+data class AuthField(
+    val key: String,
+    val label: String,
+    val secret: Boolean,
+    val multiline: Boolean,
+    val hint: String,
+    val set: Boolean,
+    val value: String,
+) {
+    companion object {
+        fun from(json: JSONObject) = AuthField(
+            key = json.optString("key"),
+            label = json.optString("label"),
+            secret = json.optBoolean("secret"),
+            multiline = json.optBoolean("multiline"),
+            hint = json.optString("hint"),
+            set = json.optBoolean("set"),
+            value = json.optString("value"),
+        )
+    }
+}
+
+data class AuthProvider(val type: String, val name: String, val hint: String, val configured: Boolean, val fields: List<AuthField>) {
+    companion object {
+        fun listFrom(json: JSONObject): List<AuthProvider> = json.optJSONArray("providers").objects().map {
+            AuthProvider(
+                type = it.optString("type"),
+                name = it.optString("name"),
+                hint = it.optString("hint"),
+                configured = it.optBoolean("configured"),
+                fields = it.optJSONArray("fields").objects().map(AuthField::from),
+            )
+        }
     }
 }
 

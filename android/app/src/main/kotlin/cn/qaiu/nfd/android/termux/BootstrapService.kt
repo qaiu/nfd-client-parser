@@ -128,10 +128,11 @@ class BootstrapService : Service() {
             context.stopService(Intent(context, BootstrapService::class.java))
         }
 
-        fun installCommand(info: BootstrapInfo, token: String, port: Int, allowAppControl: Boolean): String = buildString {
+        fun installCommand(info: BootstrapInfo, token: String, port: Int, allowAppControl: Boolean, chinaMirror: Boolean): String = buildString {
             append("curl -fsSL ").append(info.baseUrl).append("/install.sh | bash -s -- --source ").append(info.baseUrl)
             append(" --token ").append(token).append(" --port ").append(port)
             if (allowAppControl) append(" --allow-app-control")
+            if (chinaMirror) append(" --mirror china")
         }
     }
 }

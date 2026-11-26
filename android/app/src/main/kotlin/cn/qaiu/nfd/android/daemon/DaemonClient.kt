@@ -33,8 +33,16 @@ class DaemonClient(
 
     suspend fun health(): Health = Health.from(get("/api/health"))
 
-    suspend fun list(link: String, password: String, folder: Entry?): Listing =
-        Listing.from(post("/api/list", share(link, password).put("folder", folder?.toJson() ?: JSONObject.NULL)))
+    suspend fun list(link: String, password: String, folder: Entry?, page: Int = 1, cursor: String? = null): Listing =
+        Listing.from(
+            post(
+                "/api/list",
+                share(link, password)
+                    .put("folder", folder?.toJson() ?: JSONObject.NULL)
+                    .put("page", page)
+                    .put("cursor", cursor ?: JSONObject.NULL),
+            ),
+        )
 
     suspend fun tasks(): List<Task> = Task.listFrom(get("/api/tasks"))
 
@@ -65,6 +73,18 @@ class DaemonClient(
 
     suspend fun updateSettings(maxConcurrent: Int, connections: Int): DaemonSettings =
         DaemonSettings.from(post("/api/settings", JSONObject().put("maxConcurrent", maxConcurrent).put("connections", connections)))
+
+    /** Blank restores the default folder; the daemon rejects folders Termux cannot write to. */
+    suspend fun setDownloadDir(path: String): DaemonSettings =
+        DaemonSettings.from(post("/api/settings", JSONObject().put("downloadDir", path)))
+
+    suspend fun auths(): List<AuthProvider> = AuthProvider.listFrom(get("/api/auths"))
+
+    suspend fun saveAuth(type: String, fields: Map<String, String>): List<AuthProvider> =
+        AuthProvider.listFrom(post("/api/auths", JSONObject().put("type", type).put("fields", JSONObject(fields))))
+
+    suspend fun clearAuth(type: String): List<AuthProvider> =
+        AuthProvider.listFrom(post("/api/auths/clear", JSONObject().put("type", type)))
 
     suspend fun shutdown() {
         post("/api/shutdown", JSONObject())

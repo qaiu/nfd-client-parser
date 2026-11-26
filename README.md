@@ -86,7 +86,7 @@ Termux 的 armv7（`arm`）和 i686 也有 openjdk-21 包，守护进程是纯 J
 ### 首次使用
 
 1. 安装 Termux：从 [F-Droid](https://f-droid.org/packages/com.termux/) 或 [GitHub Releases](https://github.com/termux/termux-app/releases) 安装。**Google Play 上的 Termux 版本过旧，无法安装软件包。**
-2. 安装并打开 NFD App，进入「连接」页：
+2. 安装并打开 NFD App，进入「设置」页：
    - 勾选「允许 App 一键启动/停止」（推荐），点「生成安装命令」→「复制并打开 Termux」。
    - 在 Termux 中长按粘贴并回车。命令形如：
 
@@ -125,7 +125,7 @@ pkg install -y openjdk-21 curl
 curl -fLO https://github.com/qaiu/nfd-client-parser/releases/download/v<版本>/nfd-termux-daemon-<版本>.tar.gz
 tar -xzf nfd-termux-daemon-<版本>.tar.gz
 bash nfd-termux/bin/install.sh --bundle nfd-termux-daemon-<版本>.tar.gz
-nfd-termux token   # 把这个令牌填到 App「连接」页的高级设置里
+nfd-termux token   # 把这个令牌填到 App「设置」页的高级设置里
 ```
 
 ### 安全设计
