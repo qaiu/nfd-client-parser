@@ -143,7 +143,12 @@ if [ "$INSTALLER" = 1 ]; then
       fi
       ;;
     macos)
-      jpackage "${COMMON[@]}" --app-image "$IMAGE" --type dmg
+      # hdiutil on CI runners intermittently fails with "Resource busy".
+      for attempt in 1 2 3; do
+        if jpackage "${COMMON[@]}" --app-image "$IMAGE" --type dmg; then break; fi
+        [ "$attempt" = 3 ] && exit 1
+        rm -rf "$WORK"; mkdir -p "$WORK"; sleep 5
+      done
       mv "$DIST/$NAME-$APP_VERSION.dmg" "$DIST/$BASE.dmg"
       ;;
     windows)
