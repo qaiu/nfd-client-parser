@@ -9,6 +9,7 @@ import io.vertx.core.json.JsonObject;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,10 +35,12 @@ class AuthStoreTest {
     @Test
     void describeHidesSecretsButShowsAccounts() throws Exception {
         AuthStore store = AuthStore.load(dir.resolve("auths.json"));
-        store.update("fj", Map.of("username", "alice", "password", "hunter2"));
+        String account = "account-" + dir.getFileName();
+        String secret = UUID.randomUUID().toString();
+        store.update("fj", Map.of("username", account, "password", secret));
         String described = store.describe().encode();
-        assertFalse(described.contains("hunter2"));
-        assertTrue(described.contains("alice"));
+        assertFalse(described.contains(secret));
+        assertTrue(described.contains(account));
         assertTrue(store.configured("fj"));
         store.clear("fj");
         assertFalse(store.configured("fj"));
