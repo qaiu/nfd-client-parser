@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# nfd-termux: run the NFD share-link daemon (cn.qaiu:parser on Termux's OpenJDK).
+#   nfd-termux start|stop|restart|status|logs [N]|token [NEW]|self-test [--online]|version|uninstall
+set -u
+
+NFD_HOME="${NFD_HOME:-$HOME/.nfd}"
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+APP_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+CONF="$NFD_HOME/daemon.properties"
+PID_FILE="$NFD_HOME/daemon.pid"
+LOG_FILE="$NFD_HOME/daemon.log"
+
+prop() {
+    [ -f "$CONF" ] && sed -n "s/^$1=//p" "$CONF" | tail -n 1 | tr -d '\r'
+}
+
+port() {
+    local p
+    p="$(prop port)"
+    echo "${p:-17890}"
+}
+
+find_java() {
+    if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+        echo "$JAVA_HOME/bin/java"
+        return
+    fi
+    command -v java 2>/dev/null || true
+}
+
+java_cmd() {
+    local java
+    java="$(find_java)"
+    if [ -z "$java" ]; then
+        echo "未找到 java，请先运行: pkg install -y openjdk-21" >&2
+        return 1
+    fi
+    mkdir -p "$NFD_HOME/cache"
+    # Small heap, serial GC and C1-only JIT keep the daemon light on phones.
+    exec "$java" -Xmx256m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 \
+        -Dfile.encoding=UTF-8 \
+        -Djava.io.tmpdir="${TMPDIR:-/tmp}" \
+        -Dvertx.cacheDirBase="$NFD_HOME/cache" \
+        -Dlogback.configurationFile="$APP_DIR/conf/logback.xml" \
+        ${NFD_JAVA_OPTS:-} \
+        -cp "$APP_DIR/lib/*" cn.qaiu.nfd.daemon.DaemonMain "$@"
+}
+
+running() {
+    [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+health() {
+    curl -fsS --max-time 3 -H "X-NFD-Token: $(prop token)" "http://127.0.0.1:$(port)/api/health"
+}
+
+start() {
+    if running; then
+        echo "nfd-termux 已在运行 (pid $(cat "$PID_FILE"))"
+        return 0
+    fi
+    mkdir -p "$NFD_HOME"
+    if command -v termux-wake-lock >/dev/null 2>&1; then
+        termux-wake-lock >/dev/null 2>&1 || true
+    fi
+    echo "---- $(date '+%F %T') start" >>"$LOG_FILE"
+    nohup "$SELF" __run "$@" >>"$LOG_FILE" 2>&1 </dev/null &
+    echo $! >"$PID_FILE"
+    local i
+    for i in $(seq 1 90); do
+        if health >/dev/null 2>&1; then
+            echo "nfd-termux 已启动: http://127.0.0.1:$(port)"
+            echo "日志: $LOG_FILE"
+            return 0
+        fi
+        if ! running; then
+            echo "启动失败，最近日志:" >&2
+            tail -n 30 "$LOG_FILE" >&2
+            rm -f "$PID_FILE"
+            return 1
+        fi
+        sleep 0.5
+    done
+    echo "启动超时，请查看日志: $LOG_FILE" >&2
+    return 1
+}
+
+stop() {
+    if ! running; then
+        rm -f "$PID_FILE"
+        echo "nfd-termux 未运行"
+    else
+        curl -fsS --max-time 3 -X POST -H "X-NFD-Token: $(prop token)" \
+            "http://127.0.0.1:$(port)/api/shutdown" >/dev/null 2>&1 || true
+        local i
+        for i in $(seq 1 20); do
+            running || break
+            sleep 0.5
+        done
+        if running; then
+            kill "$(cat "$PID_FILE")" 2>/dev/null || true
+            sleep 1
+            running && kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
+        fi
+        rm -f "$PID_FILE"
+        echo "nfd-termux 已停止"
+    fi
+    if command -v termux-wake-unlock >/dev/null 2>&1; then
+        termux-wake-unlock >/dev/null 2>&1 || true
+    fi
+}
+
+set_token() {
+    local value="$1"
+    if ! printf '%s' "$value" | grep -Eq '^[A-Za-z0-9_-]{16,128}$'; then
+        echo "令牌格式不正确" >&2
+        return 2
+    fi
+    mkdir -p "$NFD_HOME"
+    touch "$CONF"
+    chmod 600 "$CONF"
+    if grep -q '^token=' "$CONF"; then
+        sed -i "s|^token=.*|token=$value|" "$CONF"
+    else
+        printf 'token=%s\n' "$value" >>"$CONF"
+    fi
+    echo "令牌已更新"
+    if running; then
+        stop && start
+    fi
+}
+
+cmd="${1:-status}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+    start) start "$@" ;;
+    stop) stop ;;
+    restart) stop; start "$@" ;;
+    status)
+        if running && health; then
+            echo
+        else
+            echo "nfd-termux 未运行。运行 nfd-termux start 启动。"
+            exit 3
+        fi
+        ;;
+    logs) tail -n "${1:-100}" "$LOG_FILE" ;;
+    token)
+        if [ $# -gt 0 ]; then
+            set_token "$1"
+        else
+            prop token
+        fi
+        ;;
+    __run) java_cmd --home "$NFD_HOME" "$@" ;;
+    self-test) java_cmd --self-test "$@" ;;
+    version) java_cmd --version ;;
+    uninstall)
+        stop
+        rm -rf "$NFD_HOME/app"
+        rm -f "${PREFIX:-$HOME/.local}/bin/nfd-termux"
+        echo "已卸载程序。任务记录与配置保留在 $NFD_HOME，下载的文件不会删除。"
+        ;;
+    *)
+        echo "用法: nfd-termux start|stop|restart|status|logs [N]|token [NEW]|self-test [--online]|version|uninstall" >&2
+        exit 2
+        ;;
+esac

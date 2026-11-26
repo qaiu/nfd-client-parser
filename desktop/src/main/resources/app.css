@@ -1,0 +1,194 @@
+.root {
+    -fx-font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -fx-font-size: 13px;
+    -fx-accent: #0b6bcb;
+    -fx-focus-color: #0b6bcb;
+    -fx-faint-focus-color: #0b6bcb22;
+}
+
+.app {
+    -fx-background-color: #eef2f6;
+}
+
+.header {
+    -fx-padding: 14 14 12 14;
+}
+
+.title {
+    -fx-font-size: 20px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #1b2430;
+}
+
+.muted {
+    -fx-text-fill: #5c6b7a;
+}
+
+.pan {
+    -fx-text-fill: #0b6bcb;
+    -fx-font-weight: 600;
+}
+
+.crumb-current {
+    -fx-font-weight: 600;
+    -fx-text-fill: #1b2430;
+    -fx-padding: 0 4 0 4;
+}
+
+.hyperlink {
+    -fx-text-fill: #0b6bcb;
+    -fx-border-color: transparent;
+}
+
+.text-field, .password-field {
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-color: #d7dee7;
+    -fx-border-radius: 8;
+    -fx-padding: 7 10 7 10;
+}
+
+.text-field:focused, .password-field:focused {
+    -fx-border-color: #0b6bcb;
+}
+
+.button {
+    -fx-background-color: white;
+    -fx-border-color: #d7dee7;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 6 12 6 12;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-background-color: #f3f6fa;
+}
+
+.button.accent {
+    -fx-background-color: #0b6bcb;
+    -fx-text-fill: white;
+    -fx-border-color: #0b6bcb;
+}
+
+.button.accent:hover {
+    -fx-background-color: #0a5fb4;
+}
+
+.button:disabled {
+    -fx-opacity: 0.5;
+}
+
+.split-pane {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.split-pane > .split-pane-divider {
+    -fx-background-color: transparent;
+    -fx-padding: 0 5 0 5;
+}
+
+.card {
+    -fx-background-color: white;
+    -fx-background-radius: 12;
+    -fx-border-color: #d7dee7;
+    -fx-border-radius: 12;
+    -fx-padding: 12;
+}
+
+.card-title {
+    -fx-font-size: 15px;
+    -fx-font-weight: 700;
+    -fx-text-fill: #1b2430;
+}
+
+.table-view {
+    -fx-background-color: transparent;
+    -fx-border-color: #e6ebf1;
+    -fx-border-radius: 8;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: #f6f8fb;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #dcebfb;
+}
+
+.table-row-cell:selected .text,
+.table-row-cell:selected .label {
+    -fx-fill: #1b2430;
+    -fx-text-fill: #1b2430;
+}
+
+.task-name {
+    -fx-text-fill: #1b2430;
+    -fx-font-weight: 600;
+}
+
+.error-text {
+    -fx-text-fill: #b42318;
+}
+
+.progress-bar > .bar {
+    -fx-background-color: #0b6bcb;
+    -fx-background-insets: 0;
+    -fx-background-radius: 4;
+    -fx-padding: 3;
+}
+
+.progress-bar > .track {
+    -fx-background-color: #e6ebf1;
+    -fx-background-radius: 4;
+}
+
+.progress-bar.done > .bar {
+    -fx-background-color: #1f9d55;
+}
+
+.progress-bar.failed > .bar {
+    -fx-background-color: #d64545;
+}
+
+.progress-bar.paused > .bar {
+    -fx-background-color: #9aa8b6;
+}
+
+.state-running {
+    -fx-text-fill: #0b6bcb;
+}
+
+.state-completed {
+    -fx-text-fill: #1f9d55;
+}
+
+.state-failed {
+    -fx-text-fill: #b42318;
+}
+
+.state-paused, .state-queued {
+    -fx-text-fill: #5c6b7a;
+}
+
+.status {
+    -fx-padding: 7 12 7 12;
+    -fx-background-color: white;
+    -fx-background-radius: 8;
+    -fx-border-color: #d7dee7;
+    -fx-border-radius: 8;
+}
+
+.status-text {
+    -fx-text-fill: #1b2430;
+}
+
+.status.error {
+    -fx-border-color: #f3c4c0;
+    -fx-background-color: #fff6f5;
+}
+
+.status.error .status-text {
+    -fx-text-fill: #b42318;
+}
