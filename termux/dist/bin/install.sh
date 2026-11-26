@@ -66,6 +66,10 @@ main() {
     mkdir -p "$nfd_home/app.new"
     tar -xzf "$bundle" -C "$nfd_home/app.new" --strip-components=1
     chmod +x "$nfd_home/app.new/bin/"*
+    # Termux has no /usr/bin/env; termux-exec usually rewrites it, but not in every shell.
+    if command -v termux-fix-shebang >/dev/null 2>&1; then
+        termux-fix-shebang "$nfd_home/app.new/bin/"*
+    fi
     rm -rf "$nfd_home/app.old"
     if [ -d "$nfd_home/app" ]; then
         mv "$nfd_home/app" "$nfd_home/app.old"

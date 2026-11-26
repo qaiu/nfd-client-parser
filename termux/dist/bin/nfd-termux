@@ -61,7 +61,7 @@ start() {
     fi
     mkdir -p "$NFD_HOME"
     if command -v termux-wake-lock >/dev/null 2>&1; then
-        termux-wake-lock || true
+        termux-wake-lock >/dev/null 2>&1 || true
     fi
     echo "---- $(date '+%F %T') start" >>"$LOG_FILE"
     nohup "$SELF" __run "$@" >>"$LOG_FILE" 2>&1 </dev/null &
@@ -106,7 +106,7 @@ stop() {
         echo "nfd-termux 已停止"
     fi
     if command -v termux-wake-unlock >/dev/null 2>&1; then
-        termux-wake-unlock || true
+        termux-wake-unlock >/dev/null 2>&1 || true
     fi
 }
 
