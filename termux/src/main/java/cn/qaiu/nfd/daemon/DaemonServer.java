@@ -4,6 +4,7 @@ import cn.qaiu.nfd.core.DownloadManager;
 import cn.qaiu.nfd.core.DownloadRequest;
 import cn.qaiu.nfd.core.LinkRefresher;
 import cn.qaiu.nfd.core.TaskSnapshot;
+import cn.qaiu.nfd.share.AuthStore;
 import cn.qaiu.nfd.share.ParserRuntime;
 import cn.qaiu.nfd.share.ShareErrors;
 import cn.qaiu.nfd.share.ShareSession;
@@ -20,6 +21,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -48,15 +50,17 @@ final class DaemonServer implements AutoCloseable {
     private final DaemonConfig config;
     private final ShareBackend backend;
     private final DownloadManager downloads;
+    private final AuthStore auths;
     private final String version;
     private final CountDownLatch stopped = new CountDownLatch(1);
     private HttpServer server;
     private ExecutorService executor;
 
-    DaemonServer(DaemonConfig config, ShareBackend backend, DownloadManager downloads, String version) {
+    DaemonServer(DaemonConfig config, ShareBackend backend, DownloadManager downloads, AuthStore auths, String version) {
         this.config = config;
         this.backend = backend;
         this.downloads = downloads;
+        this.auths = auths;
         this.version = version;
     }
 
@@ -128,6 +132,10 @@ final class DaemonServer implements AutoCloseable {
             send(exchange, 200, settings());
             return;
         }
+        if (method.equals("GET") && path.equals("/api/auths")) {
+            send(exchange, 200, auths.describe());
+            return;
+        }
         if (!method.equals("POST")) {
             send(exchange, 404, error("未知接口"));
             return;
@@ -136,8 +144,10 @@ final class DaemonServer implements AutoCloseable {
         switch (path) {
             case "/api/inspect" -> send(exchange, 200, backend.inspect(link(body), body.getString("password")));
             case "/api/list" -> {
+                Integer page = body.getInteger("page");
                 ShareSession.Listing listing = backend.list(link(body), body.getString("password"),
-                        ShareSession.Entry.fromJson(body.getJsonObject("folder")));
+                        ShareSession.Entry.fromJson(body.getJsonObject("folder")),
+                        page == null ? 1 : Math.max(1, page), body.getString("cursor"));
                 send(exchange, 200, listingJson(listing));
             }
             case "/api/resolve" -> {
@@ -170,8 +180,37 @@ final class DaemonServer implements AutoCloseable {
                     config.connections = clamp(body.getInteger("connections"), 1, 16);
                     downloads.setConnections(config.connections);
                 }
+                if (body.containsKey("downloadDir")) {
+                    try {
+                        config.useDownloadDir(body.getString("downloadDir"));
+                    } catch (IOException | RuntimeException ex) {
+                        throw new BadRequest(ex.getMessage());
+                    }
+                }
                 config.save();
                 send(exchange, 200, settings());
+            }
+            case "/api/auths" -> {
+                String type = body.getString("type");
+                JsonObject fields = body.getJsonObject("fields");
+                if (type == null || AuthStore.provider(type) == null) {
+                    throw new BadRequest("不支持的网盘类型");
+                }
+                Map<String, String> changes = new LinkedHashMap<>();
+                if (fields != null) {
+                    for (String key : fields.fieldNames()) {
+                        Object value = fields.getValue(key);
+                        changes.put(key, value == null ? "" : value.toString());
+                    }
+                }
+                auths.update(type, changes);
+                backend.invalidate();
+                send(exchange, 200, auths.describe());
+            }
+            case "/api/auths/clear" -> {
+                auths.clear(body.getString("type"));
+                backend.invalidate();
+                send(exchange, 200, auths.describe());
             }
             case "/api/shutdown" -> {
                 send(exchange, 200, new JsonObject().put("ok", true));
@@ -269,7 +308,9 @@ final class DaemonServer implements AutoCloseable {
                 .put("maxConcurrent", downloads.maxConcurrent())
                 .put("connections", downloads.connections())
                 .put("downloadDir", config.effectiveDownloadDir().toString())
-                .put("downloadDirShared", config.downloadDirShared());
+                .put("downloadDirShared", config.downloadDirShared())
+                .put("downloadDirCustom", config.downloadDir != null)
+                .put("defaultDownloadDir", config.defaultDownloadDir().toString());
     }
 
     private JsonObject tasks() {
@@ -326,7 +367,12 @@ final class DaemonServer implements AutoCloseable {
         return new JsonObject()
                 .put("panName", listing.panName())
                 .put("type", listing.type())
-                .put("entries", entries);
+                .put("entries", entries)
+                .put("page", listing.page())
+                .put("hasMore", listing.hasMore())
+                .put("nextCursor", listing.nextCursor())
+                .put("singleFile", listing.singleFile())
+                .put("note", listing.note());
     }
 
     private boolean authorized(HttpExchange exchange) {

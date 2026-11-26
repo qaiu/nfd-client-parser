@@ -21,6 +21,10 @@ public final class ShareErrors {
         if (error == null) {
             return "未知错误";
         }
+        ShareSession.ParseFailure both = find(error, ShareSession.ParseFailure.class);
+        if (both != null) {
+            return both.getMessage();
+        }
         String all = collectMessages(error);
         String lower = all.toLowerCase(Locale.ROOT);
         if (has(error, UnknownHostException.class) || lower.contains("failed to resolve") || lower.contains("unknownhost")) {
@@ -39,6 +43,11 @@ public final class ShareErrors {
             return "请先粘贴分享链接";
         }
         String detail = providerMessage(all);
+        if (!all.contains("提取码") && (all.contains("登录") || lower.contains("auths.")
+                || lower.contains("refresh_token"))) {
+            return "该网盘需要登录信息，请在「设置 → 网盘账号」中填写"
+                    + (detail.isEmpty() ? "" : "：" + detail);
+        }
         if (all.contains("密码") || all.contains("提取码") || lower.contains("pwd") || lower.contains("password")) {
             return "提取码错误或缺少提取码" + (detail.isEmpty() ? "" : "：" + detail);
         }
@@ -93,14 +102,18 @@ public final class ShareErrors {
     }
 
     private static boolean has(Throwable error, Class<? extends Throwable> type) {
+        return find(error, type) != null;
+    }
+
+    private static <T extends Throwable> T find(Throwable error, Class<T> type) {
         Throwable current = error;
         int depth = 0;
         while (current != null && depth++ < 10) {
             if (type.isInstance(current)) {
-                return true;
+                return type.cast(current);
             }
             current = current.getCause();
         }
-        return false;
+        return null;
     }
 }
