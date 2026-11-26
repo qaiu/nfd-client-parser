@@ -154,10 +154,10 @@ fun BrowseScreen(state: UiState, viewModel: MainViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "已选 ${state.selected.size} / ${files.size}" + if (level.listing.hasMore) "（仅已加载）" else "",
+                        "已选 ${state.selected.size} / ${files.size}" + if (level.listing.hasMore) "+" else "",
                         modifier = Modifier.weight(1f),
                     )
-                    OutlinedButton(onClick = { viewModel.download(files) }, enabled = online) { Text("全部下载") }
+                    OutlinedButton(onClick = { viewModel.download(files) }, enabled = online) { Text(if (level.listing.hasMore) "下载已加载" else "全部下载") }
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = viewModel::downloadSelected, enabled = online && state.selected.isNotEmpty()) { Text("下载选中") }
                 }

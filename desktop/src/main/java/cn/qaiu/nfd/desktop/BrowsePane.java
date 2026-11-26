@@ -284,6 +284,7 @@ final class BrowsePane extends VBox {
         noteLabel.setText(note == null ? "" : note);
         noteLabel.setVisible(note != null && !note.isBlank());
         moreButton.setVisible(level.listing.hasMore());
+        allButton.setText(level.listing.hasMore() ? "下载已加载" : "全部下载");
         moreButton.setText("加载更多（已加载 " + level.listing.entries().size() + " 项）");
         panLabel.setText(level.listing.panName() == null ? "" : level.listing.panName());
         crumbs.getChildren().clear();

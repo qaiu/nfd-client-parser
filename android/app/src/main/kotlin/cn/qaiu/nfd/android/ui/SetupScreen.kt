@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -184,8 +185,9 @@ private fun StatusCard(state: UiState, viewModel: MainViewModel) {
                     val h = connection.health
                     Text("已连接 Termux 守护进程 ${h.version}", fontWeight = FontWeight.Bold)
                     Text("parser ${h.parserVersion} · ${h.java}", style = MaterialTheme.typography.bodySmall)
-                    Text("下载目录：${h.downloadDir}", style = MaterialTheme.typography.bodySmall)
-                    if (!h.downloadDirShared) {
+                    val settings = state.settings
+                    Text("下载目录：${settings?.downloadDir ?: h.downloadDir}", style = MaterialTheme.typography.bodySmall)
+                    if (!h.downloadDirShared && settings?.downloadDirCustom != true) {
                         Text(
                             "文件保存在 Termux 私有目录。在 Termux 中运行 termux-setup-storage 并重启守护进程后，会改存到 Download/nfd。",
                             style = MaterialTheme.typography.bodySmall,
@@ -244,6 +246,7 @@ private fun DownloadSettings(state: UiState, viewModel: MainViewModel, pickFolde
     var concurrent by remember(settings) { mutableFloatStateOf(settings.maxConcurrent.toFloat()) }
     var connections by remember(settings) { mutableFloatStateOf(settings.connections.toFloat()) }
     var path by remember(settings.downloadDir) { mutableStateOf(settings.downloadDir) }
+    val focus = LocalFocusManager.current
     Step("下载设置", done = null) {
         Text("下载位置", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
         Text(
@@ -259,12 +262,18 @@ private fun DownloadSettings(state: UiState, viewModel: MainViewModel, pickFolde
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { viewModel.setDownloadDir(path) }, enabled = path.isNotBlank() && path.trim() != settings.downloadDir) {
+            Button(onClick = {
+                focus.clearFocus()
+                viewModel.setDownloadDir(path)
+            }, enabled = path.isNotBlank() && path.trim() != settings.downloadDir) {
                 Text("应用")
             }
             OutlinedButton(onClick = pickFolder) { Text("选择文件夹") }
             if (settings.downloadDirCustom) {
-                TextButton(onClick = { viewModel.setDownloadDir("") }) { Text("恢复默认") }
+                TextButton(onClick = {
+                    focus.clearFocus()
+                    viewModel.setDownloadDir("")
+                }) { Text("恢复默认") }
             }
         }
         Text(
@@ -353,7 +362,12 @@ private fun AuthDialog(provider: AuthProvider, onDismiss: () -> Unit, onSave: (M
                         value = value,
                         onValueChange = { value = it },
                         label = { Text(field.label) },
-                        placeholder = { if (field.secret && field.set) Text("已填写，留空则保持不变") else if (field.hint.isNotBlank()) Text(field.hint) },
+                        placeholder = { if (field.hint.isNotBlank() && !(field.secret && field.set)) Text(field.hint) },
+                        supportingText = if (field.secret && field.set) {
+                            { Text("已填写，留空则保持不变") }
+                        } else {
+                            null
+                        },
                         singleLine = !field.multiline,
                         minLines = if (field.multiline) 3 else 1,
                         maxLines = if (field.multiline) 6 else 1,
