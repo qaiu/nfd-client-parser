@@ -156,7 +156,7 @@ jobs:
           - name: linux-arm64
             runner: ubuntu-22.04-arm
           - name: macos-arm64
-            runner: macos-14
+            runner: macos-latest
           - name: macos-x64
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}

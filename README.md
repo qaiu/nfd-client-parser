@@ -70,7 +70,7 @@ CI 实际构建并测试的矩阵：
 | Windows | arm64 | 使用 x64 包 | windows-11-arm | 在 x64 仿真下运行 x64 包的 `--self-test`（不阻断） |
 | Linux | x64 | tar.gz、deb | ubuntu-22.04 | `--self-test` |
 | Linux | arm64 | tar.gz、deb | ubuntu-22.04-arm | `--self-test` |
-| macOS | arm64 | dmg、zip | macos-14 | `--self-test` |
+| macOS | arm64 | dmg、zip | macos-latest | `--self-test` |
 | macOS | x64 | dmg、zip | macos-15-intel | `--self-test` |
 
 Termux 的 armv7（`arm`）和 i686 也有 openjdk-21 包，守护进程是纯 Java，理论上可用，但 CI 没有对应的 termux-docker 测试。
