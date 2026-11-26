@@ -87,6 +87,15 @@ class ShareSessionTest {
     }
 
     @Test
+    void extractsPasswordFromShareText() {
+        assertEquals("abcd", ShareSession.extractPassword("链接：https://pan.baidu.com/s/1xyz 提取码：abcd 复制这段内容"));
+        assertEquals("8k2p", ShareSession.extractPassword("https://www.123pan.com/s/abc?pwd=8k2p"));
+        assertEquals("1234", ShareSession.extractPassword("https://pan.lanzoui.com/i1 密码:1234"));
+        assertEquals("", ShareSession.extractPassword("https://pan.quark.cn/s/abcdef"));
+        assertEquals("", ShareSession.extractPassword("pwd 123456789 is too long"));
+    }
+
+    @Test
     void friendlyErrors() {
         RuntimeException gone = new RuntimeException("夸克网盘-qk: url=x - 解析异常: token 返回异常: {\"status\":404,\"message\":\"分享不存在\"}");
         assertEquals("分享已失效：分享不存在", ShareErrors.friendly(new RuntimeException(gone)));

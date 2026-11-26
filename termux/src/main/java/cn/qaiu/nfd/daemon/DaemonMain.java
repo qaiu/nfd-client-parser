@@ -2,20 +2,15 @@ package cn.qaiu.nfd.daemon;
 
 import cn.qaiu.nfd.core.DownloadManager;
 import cn.qaiu.nfd.share.ParserRuntime;
-import cn.qaiu.nfd.share.ShareSession;
+import cn.qaiu.nfd.share.SelfTest;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 
 /**
  * Entry point of the Termux daemon: {@code cn.qaiu:parser} on Termux's OpenJDK, plus the shared
@@ -125,36 +120,12 @@ public final class DaemonMain {
     }
 
     private static boolean selfTest(boolean online) {
-        boolean ok = true;
-        ok &= check("java " + System.getProperty("java.version") + " on " + System.getProperty("os.arch"), () -> true);
-        ok &= check("parser " + ParserRuntime.parserVersion(), () -> !ParserRuntime.parserVersion().equals("unknown"));
-        ok &= check("GBK charset", () -> Charset.isSupported("GBK"));
-        ok &= check("TLS with EC ciphers", () -> {
-            SSLEngine engine = SSLContext.getDefault().createSSLEngine();
-            for (String suite : engine.getEnabledCipherSuites()) {
-                if (suite.contains("ECDHE")) {
-                    return true;
-                }
-            }
-            return false;
-        });
-        ok &= check("Nashorn script engine", () -> {
-            ScriptEngine engine = new ScriptEngineManager().getEngineByName("nashorn");
-            return engine != null && Integer.valueOf(3).equals(((Number) engine.eval("1 + 2")).intValue());
-        });
-        ok &= check("share link detection", () -> ShareSession.open("https://pan.lanzoui.com/b66477", null).type().equals("lz"));
-        ok &= check("Vert.x runtime", () -> {
-            ParserRuntime.start();
-            return ParserRuntime.started();
-        });
-        ok &= check("daemon HTTP API", DaemonMain::apiRoundTrip);
+        SelfTest test = new SelfTest(System.out).runtimeChecks()
+                .check("daemon HTTP API", DaemonMain::apiRoundTrip);
         if (online) {
-            ok &= check("live listing (pan.lanzoui.com/b66477)", () -> !ShareSession.open("https://pan.lanzoui.com/b66477", null)
-                    .list(null).entries().isEmpty());
+            test.onlineCheck();
         }
-        ParserRuntime.stop();
-        System.out.println(ok ? "SELF-TEST OK" : "SELF-TEST FAILED");
-        return ok;
+        return test.finish();
     }
 
     private static boolean apiRoundTrip() throws Exception {
@@ -176,23 +147,5 @@ public final class DaemonMain {
                 server.close();
             }
         }
-    }
-
-    private static boolean check(String name, Check check) {
-        boolean passed;
-        String detail = "";
-        try {
-            passed = check.run();
-        } catch (Throwable ex) {
-            passed = false;
-            detail = " (" + ex + ")";
-        }
-        System.out.println((passed ? "[ok]   " : "[FAIL] ") + name + detail);
-        return passed;
-    }
-
-    @FunctionalInterface
-    private interface Check {
-        boolean run() throws Exception;
     }
 }

@@ -249,6 +249,29 @@ public final class ShareSession {
         return params;
     }
 
+    private static final java.util.regex.Pattern PASSWORD_TEXT = java.util.regex.Pattern.compile(
+            "(?:提取码|访问码|密码|pwd|code)\\s*[:：=]?\\s*([A-Za-z0-9]{3,8})(?![A-Za-z0-9])",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** Finds the code in share text such as "链接：https://… 提取码：abcd", or a {@code ?pwd=} parameter. */
+    public static String extractPassword(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "";
+        }
+        String fromQuery = queryParams(extractUrl(raw)).get("pwd");
+        if (fromQuery != null && !fromQuery.isBlank()) {
+            return fromQuery;
+        }
+        java.util.regex.Matcher matcher = PASSWORD_TEXT.matcher(raw);
+        while (matcher.find()) {
+            // Skip "pwd=" inside the URL itself; that case was handled above.
+            if (raw.charAt(Math.max(0, matcher.start() - 1)) != '?' && raw.charAt(Math.max(0, matcher.start() - 1)) != '&') {
+                return matcher.group(1);
+            }
+        }
+        return "";
+    }
+
     public static String extractUrl(String raw) {
         if (raw == null) {
             return "";
