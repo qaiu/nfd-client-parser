@@ -33,7 +33,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.net.ssl.SSLException;
 
-/** Runs one task until it completes, fails or is paused. */
+/**
+ * Runs one task until it completes, fails or is paused.
+ *
+ * <p>Uses {@code new URL(String)} on purpose: {@code URI.create} rejects the unescaped characters
+ * some CDNs put into signed download URLs.
+ */
+@SuppressWarnings("deprecation")
 final class TransferRunner {
 
     private static final int MAX_REDIRECTS = 10;
@@ -192,7 +198,7 @@ final class TransferRunner {
                 }
                 rejectHtml(connection);
                 String disposition = fileNameFromDisposition(connection.getHeaderField("Content-Disposition"));
-                if (disposition != null && (task.fileName == null || task.fileName.isBlank() || task.fileName.equals("download"))) {
+                if (disposition != null && betterName(task.fileName, disposition)) {
                     task.fileName = disposition;
                 }
                 if (code == 206) {
@@ -548,6 +554,19 @@ final class TransferRunner {
             return new Failure(Kind.TRANSIENT, "网络连接中断");
         }
         return new Failure(Kind.TRANSIENT, "网络错误：" + describe(ex));
+    }
+
+    /** Share listings often truncate long names and drop the extension; the server's name is then better. */
+    static boolean betterName(String current, String fromServer) {
+        if (current == null || current.isBlank() || current.equals("download")) {
+            return true;
+        }
+        return !hasExtension(current) && hasExtension(fromServer);
+    }
+
+    private static boolean hasExtension(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 && dot < name.length() - 1 && name.length() - dot <= 10 && !name.substring(dot + 1).contains(" ");
     }
 
     static String fileNameFromDisposition(String header) {

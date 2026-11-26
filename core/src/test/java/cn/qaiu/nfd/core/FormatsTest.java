@@ -1,6 +1,7 @@
 package cn.qaiu.nfd.core;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -37,5 +38,14 @@ class FormatsTest {
         assertEquals("plain.bin", TransferRunner.fileNameFromDisposition("inline; filename=plain.bin"));
         assertEquals("x.bin", TransferRunner.fileNameFromDisposition("attachment; filename=\"../../x.bin\""));
         assertEquals(null, TransferRunner.fileNameFromDisposition("attachment"));
+    }
+
+    @Test
+    void prefersServerNameOnlyWhenTheListedNameIsTruncated() {
+        assertTrue(TransferRunner.betterName("", "a.zip"));
+        assertTrue(TransferRunner.betterName("download", "a.zip"));
+        assertTrue(TransferRunner.betterName("漫畫迷  已更新!最快，最全的港漫", "漫畫迷  已更新!最快，最全的港漫，国漫.apk"));
+        assertFalse(TransferRunner.betterName("my.zip", "server-name.zip"));
+        assertFalse(TransferRunner.betterName("notes", "x"));
     }
 }

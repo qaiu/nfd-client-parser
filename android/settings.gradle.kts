@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "nfd-android"
-include(":share", ":engine", ":app")
+include(":core", ":daemon", ":app")

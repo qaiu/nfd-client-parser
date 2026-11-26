@@ -1,272 +1,334 @@
 package cn.qaiu.nfd.android
 
-import android.Manifest
 import android.app.Application
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import cn.qaiu.nfd.android.download.DownloadService
-import cn.qaiu.nfd.engine.TransferSnapshot
-import cn.qaiu.nfd.engine.TransferStatus
-import cn.qaiu.nfd.share.ShareSession
-import kotlin.collections.ArrayDeque
-import kotlinx.coroutines.Dispatchers
+import cn.qaiu.nfd.android.daemon.DaemonException
+import cn.qaiu.nfd.android.daemon.DaemonSettings
+import cn.qaiu.nfd.android.daemon.Entry
+import cn.qaiu.nfd.android.daemon.Health
+import cn.qaiu.nfd.android.daemon.Listing
+import cn.qaiu.nfd.android.daemon.Task
+import cn.qaiu.nfd.android.termux.BootstrapService
+import cn.qaiu.nfd.android.termux.TermuxBridge
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
-data class NfdUiState(
+sealed interface Connection {
+    data object Checking : Connection
+    data object TermuxMissing : Connection
+    data class Offline(val reason: String) : Connection
+    data object Unauthorized : Connection
+    data class Online(val health: Health) : Connection
+}
+
+enum class Tab { BROWSE, TASKS, SETUP }
+
+/** One level of the folder stack; listings are kept so going back is instant. */
+data class Level(val title: String, val folder: Entry?, val listing: Listing)
+
+data class UiState(
+    val tab: Tab = Tab.BROWSE,
+    val connection: Connection = Connection.Checking,
     val link: String = "",
     val password: String = "",
-    val parsing: Boolean = false,
-    val message: String = "粘贴分享链接后解析",
-    val error: Boolean = false,
-    val panLabel: String = "",
-    val entries: List<ShareSession.Entry> = emptyList(),
-    val crumbs: List<String> = emptyList(),
-    val downloads: List<TransferSnapshot> = emptyList(),
-    val engineName: String = "",
-    val externalEnabled: Boolean = false,
-    val externalHost: String = "127.0.0.1",
-    val externalPort: String = "6800",
-    val externalSecret: String = ""
-)
+    val levels: List<Level> = emptyList(),
+    val loading: Boolean = false,
+    val selected: Set<String> = emptySet(),
+    val tasks: List<Task> = emptyList(),
+    val settings: DaemonSettings? = null,
+    val message: String? = null,
+    val allowAppControl: Boolean = true,
+) {
+    val current: Level? get() = levels.lastOrNull()
+    val activeTasks: Int get() = tasks.count { it.status.active }
+}
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-    private val downloads = (application as NfdApp).downloads
-    private val _state = MutableStateFlow(
-        NfdUiState(
-            engineName = downloads.engineName.value,
-            externalEnabled = downloads.externalEnabled(),
-            externalHost = downloads.externalHost(),
-            externalPort = downloads.externalPort().toString(),
-            externalSecret = downloads.externalSecret()
-        )
-    )
-    val state: StateFlow<NfdUiState> = _state
-    private var session: ShareSession? = null
-    private val dirStack = ArrayDeque<String?>()
-    private val listener: () -> Unit = {
-        val snapshots = downloads.snapshots()
-        _state.update { it.copy(downloads = snapshots, engineName = downloads.engineName.value) }
-        syncService(snapshots)
-    }
 
-    init {
-        downloads.addListener(listener)
-    }
+    private val app = application as NfdApp
+    private val daemon = app.daemon
+    private val mutable = MutableStateFlow(UiState(link = app.prefs.lastLink))
+    val state: StateFlow<UiState> = mutable.asStateFlow()
 
-    fun updateLink(value: String) = _state.update { it.copy(link = value) }
+    /** Bumped on every new parse so late results from an older link are dropped. */
+    private var generation = 0
+    private var browseJob: Job? = null
+    private var pollJob: Job? = null
+    /** The setup tab opens by itself once, the first time the daemon is unreachable. */
+    private var setupShown = false
 
-    fun updatePassword(value: String) = _state.update { it.copy(password = value) }
-
-    fun updateExternal(enabled: Boolean, host: String, port: String, secret: String) {
-        _state.update {
-            it.copy(externalEnabled = enabled, externalHost = host, externalPort = port, externalSecret = secret)
-        }
-    }
-
-    fun applyEngine() {
-        val current = _state.value
-        viewModelScope.launch(Dispatchers.IO) {
-            val failure = if (current.externalEnabled) {
-                val port = current.externalPort.toIntOrNull() ?: 6800
-                downloads.useExternal(current.externalHost.trim(), port, current.externalSecret)
-            } else {
-                downloads.useEmbedded()
-                null
-            }
-            _state.update {
-                it.copy(
-                    engineName = downloads.engineName.value,
-                    message = failure ?: "下载引擎：${downloads.engineName.value}",
-                    error = failure != null
-                )
+    fun onForeground() {
+        if (pollJob?.isActive == true) return
+        pollJob = viewModelScope.launch {
+            var tick = 0
+            while (isActive) {
+                val online = mutable.value.connection is Connection.Online
+                if (!online || tick % 10 == 0) {
+                    checkConnection()
+                }
+                if (mutable.value.connection is Connection.Online) {
+                    refreshTasks()
+                }
+                tick++
+                val busy = mutable.value.activeTasks > 0 || mutable.value.tab == Tab.TASKS
+                delay(if (mutable.value.connection is Connection.Online && busy) 1000 else 3000)
             }
         }
+    }
+
+    fun onBackground() {
+        pollJob?.cancel()
+        pollJob = null
+    }
+
+    fun select(tab: Tab) = mutable.update { it.copy(tab = tab) }
+
+    fun setLink(value: String) {
+        mutable.update { it.copy(link = value) }
+        app.prefs.lastLink = value
+    }
+
+    fun setPassword(value: String) = mutable.update { it.copy(password = value) }
+
+    fun consumeMessage() = mutable.update { it.copy(message = null) }
+
+    fun toast(message: String) = mutable.update { it.copy(message = message) }
+
+    /** Text shared from another app: pick the URL out of it and parse right away. */
+    fun onSharedText(text: String) {
+        val url = Regex("https?://[^\\s，。）】]+").find(text)?.value ?: text.trim()
+        val password = Regex("(?:提取码|密码|访问码|pwd)[:：\\s]*([A-Za-z0-9]{3,8})").find(text)?.groupValues?.get(1)
+        setLink(url)
+        mutable.update { it.copy(tab = Tab.BROWSE, password = password ?: it.password) }
+        parse()
     }
 
     fun parse() {
-        val link = _state.value.link
-        val password = _state.value.password
-        _state.update { it.copy(parsing = true, error = false, message = "正在解析…") }
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val opened = ShareSession.open(link, password.ifBlank { null })
-                    session = opened
-                    dirStack.clear()
-                    dirStack.add(null)
-                    opened to opened.list(null)
+        val link = mutable.value.link.trim()
+        if (link.isEmpty()) {
+            toast("请先粘贴分享链接")
+            return
+        }
+        val token = ++generation
+        browseJob?.cancel()
+        mutable.update { it.copy(levels = emptyList(), selected = emptySet(), loading = true) }
+        browseJob = viewModelScope.launch {
+            try {
+                val listing = daemon.list(link, mutable.value.password, null)
+                if (token != generation) return@launch
+                if (listing.entries.isEmpty()) {
+                    mutable.update { it.copy(loading = false, message = "没有列出文件，可尝试「直接下载」单文件分享") }
+                } else {
+                    mutable.update { it.copy(loading = false, levels = listOf(Level(listing.panName.ifBlank { "根目录" }, null, listing))) }
                 }
+            } catch (ex: DaemonException) {
+                if (token == generation) fail(ex)
             }
-            result.fold(
-                onSuccess = { (opened, listing) ->
-                    _state.update {
-                        it.copy(
-                            parsing = false,
-                            panLabel = "${opened.panName()} · ${opened.type()}",
-                            entries = listing.entries(),
-                            crumbs = listOf("根目录"),
-                            message = "共 ${listing.entries().size} 项",
-                            error = false
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _state.update {
-                        it.copy(parsing = false, error = true, message = error.message ?: "解析失败")
-                    }
-                }
-            )
         }
     }
 
-    fun open(entry: ShareSession.Entry) {
-        val current = session ?: return
-        if (entry.folder()) {
-            _state.update { it.copy(parsing = true, error = false, message = "正在打开文件夹…") }
+    fun openFolder(entry: Entry) {
+        val state = mutable.value
+        if (!entry.folder || state.loading) return
+        val token = generation
+        mutable.update { it.copy(loading = true) }
+        browseJob = viewModelScope.launch {
+            try {
+                val listing = daemon.list(state.link.trim(), state.password, entry)
+                if (token != generation) return@launch
+                mutable.update { it.copy(loading = false, selected = emptySet(), levels = it.levels + Level(entry.fileName, entry, listing)) }
+            } catch (ex: DaemonException) {
+                if (token == generation) fail(ex)
+            }
+        }
+    }
+
+    /** Returns false when already at the root so the activity can handle system back. */
+    fun back(): Boolean {
+        val state = mutable.value
+        if (state.loading) {
+            browseJob?.cancel()
+            generation++
+            mutable.update { it.copy(loading = false) }
+            return true
+        }
+        if (state.levels.size <= 1) return false
+        mutable.update { it.copy(levels = it.levels.dropLast(1), selected = emptySet()) }
+        return true
+    }
+
+    fun toggle(entry: Entry) = mutable.update {
+        it.copy(selected = if (entry.key in it.selected) it.selected - entry.key else it.selected + entry.key)
+    }
+
+    fun selectAll() = mutable.update { state ->
+        val files = state.current?.listing?.entries?.filterNot { it.folder }?.map { it.key }?.toSet().orEmpty()
+        state.copy(selected = if (state.selected.containsAll(files)) emptySet() else files)
+    }
+
+    fun download(entries: List<Entry>) {
+        val state = mutable.value
+        val files = entries.filterNot { it.folder }
+        if (files.isEmpty()) return
+        launchAction {
+            val tasks = daemon.downloadEntries(state.link.trim(), state.password, files)
+            mutable.update { it.copy(tasks = tasks, selected = emptySet(), message = "已加入 ${files.size} 个下载任务") }
+        }
+    }
+
+    fun downloadSelected() {
+        val state = mutable.value
+        download(state.current?.listing?.entries.orEmpty().filter { it.key in state.selected })
+    }
+
+    fun downloadDirect() {
+        val state = mutable.value
+        if (state.link.isBlank()) {
+            toast("请先粘贴分享链接")
+            return
+        }
+        mutable.update { it.copy(loading = true) }
+        launchAction {
+            try {
+                val tasks = daemon.downloadDirect(state.link.trim(), state.password)
+                mutable.update { it.copy(tasks = tasks, tab = Tab.TASKS, message = "已加入下载") }
+            } finally {
+                mutable.update { it.copy(loading = false) }
+            }
+        }
+    }
+
+    fun pause(task: Task) = launchAction { mutable.update { it.copy(tasks = daemon.pause(task.id)) } }
+
+    fun resume(task: Task) = launchAction { mutable.update { it.copy(tasks = daemon.resume(task.id)) } }
+
+    fun remove(task: Task, deleteFile: Boolean) = launchAction {
+        mutable.update { it.copy(tasks = daemon.remove(task.id, deleteFile)) }
+    }
+
+    fun pauseAll() = launchAction { mutable.update { it.copy(tasks = daemon.pauseAll()) } }
+
+    fun resumeAll() = launchAction { mutable.update { it.copy(tasks = daemon.resumeAll()) } }
+
+    fun clearFinished() = launchAction { mutable.update { it.copy(tasks = daemon.clearFinished()) } }
+
+    fun updateSettings(maxConcurrent: Int, connections: Int) = launchAction {
+        mutable.update { it.copy(settings = daemon.updateSettings(maxConcurrent, connections), message = "已保存") }
+    }
+
+    fun saveEndpoint(host: String, port: Int, token: String) {
+        app.prefs.host = host
+        app.prefs.port = port
+        if (token.isNotBlank()) app.prefs.token = token
+        recheck()
+    }
+
+    fun regenerateToken() {
+        app.prefs.regenerateToken()
+        toast("已生成新令牌，请重新在 Termux 中运行安装命令或 nfd-termux token")
+        recheck()
+    }
+
+    fun setAllowAppControl(value: Boolean) = mutable.update { it.copy(allowAppControl = value) }
+
+    fun startBootstrap() = BootstrapService.start(getApplication())
+
+    fun stopBootstrap() = BootstrapService.stop(getApplication())
+
+    fun installCommand(): String? = BootstrapService.state.value?.let {
+        BootstrapService.installCommand(it, app.prefs.token, app.prefs.port, mutable.value.allowAppControl)
+    }
+
+    fun tokenCommand(): String = "nfd-termux token ${app.prefs.token}"
+
+    fun currentHost(): String = app.prefs.host
+
+    fun currentPort(): Int = app.prefs.port
+
+    fun currentToken(): String = app.prefs.token
+
+    fun startDaemon() {
+        val error = TermuxBridge.runDaemonCommand(getApplication(), "start")
+        if (error != null) {
+            toast(error + "。也可以在 Termux 中手动运行 nfd-termux start")
+        } else {
+            toast("已请求 Termux 启动守护进程…")
             viewModelScope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { current.openFolder(entry) } }
-                result.fold(
-                    onSuccess = { listing ->
-                        dirStack.add(entry.fileId())
-                        val crumbs = _state.value.crumbs + (entry.fileName().ifBlank { "文件夹" })
-                        _state.update {
-                            it.copy(
-                                parsing = false,
-                                entries = listing.entries(),
-                                crumbs = crumbs,
-                                message = "共 ${listing.entries().size} 项"
-                            )
-                        }
-                    },
-                    onFailure = { error ->
-                        _state.update { it.copy(parsing = false, error = true, message = error.message ?: "打开失败") }
-                    }
-                )
-            }
-            return
-        }
-        resolveAndDownload(entry)
-    }
-
-    fun back() {
-        val current = session ?: return
-        if (dirStack.size <= 1) return
-        dirStack.removeLast()
-        val dirId = dirStack.last()
-        _state.update { it.copy(parsing = true, message = "正在返回…") }
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { current.list(dirId) } }
-            result.fold(
-                onSuccess = { listing ->
-                    val crumbs = _state.value.crumbs.dropLast(1).ifEmpty { listOf("根目录") }
-                    _state.update {
-                        it.copy(
-                            parsing = false,
-                            entries = listing.entries(),
-                            crumbs = crumbs,
-                            message = "共 ${listing.entries().size} 项",
-                            error = false
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _state.update { it.copy(parsing = false, error = true, message = error.message ?: "返回失败") }
-                }
-            )
-        }
-    }
-
-    fun parseDirect() {
-        val link = _state.value.link
-        val password = _state.value.password
-        _state.update { it.copy(parsing = true, message = "正在解析直链…") }
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val opened = session ?: ShareSession.open(link, password.ifBlank { null }).also { session = it }
-                    opened.parseDirect()
+                repeat(20) {
+                    delay(1500)
+                    checkConnection()
+                    if (mutable.value.connection is Connection.Online) return@launch
                 }
             }
-            result.fold(
-                onSuccess = { direct ->
-                    val name = direct.fileName().ifBlank { "download" }
-                    downloads.start(name, direct.url(), direct.headers())
-                    syncService(downloads.snapshots())
-                    _state.update {
-                        it.copy(
-                            parsing = false,
-                            downloads = downloads.snapshots(),
-                            message = "已创建下载：$name",
-                            error = false
-                        )
-                    }
-                },
-                onFailure = { error ->
-                    _state.update { it.copy(parsing = false, error = true, message = error.message ?: "解析失败") }
+        }
+    }
+
+    fun stopDaemon() = launchAction {
+        daemon.shutdown()
+        mutable.update { it.copy(connection = Connection.Offline("守护进程已停止")) }
+    }
+
+    fun recheck() {
+        mutable.update { it.copy(connection = Connection.Checking) }
+        viewModelScope.launch { checkConnection() }
+    }
+
+    private suspend fun checkConnection() {
+        val connection = try {
+            val health = daemon.health()
+            if (health.authorized) Connection.Online(health) else Connection.Unauthorized
+        } catch (ex: DaemonException) {
+            when {
+                app.prefs.host == Prefs.DEFAULT_HOST && !TermuxBridge.installed(app) -> Connection.TermuxMissing
+                ex.kind == DaemonException.Kind.UNAUTHORIZED -> Connection.Unauthorized
+                else -> Connection.Offline(ex.message ?: "未连接")
+            }
+        }
+        val wasOnline = mutable.value.connection is Connection.Online
+        mutable.update { it.copy(connection = connection) }
+        if (connection is Connection.Online) {
+            if (!wasOnline) {
+                runCatching { daemon.settings() }.onSuccess { s -> mutable.update { it.copy(settings = s) } }
+                if (BootstrapService.state.value?.bundleServed == true) {
+                    BootstrapService.stop(getApplication())
                 }
-            )
+            }
+        } else if (!setupShown && connection !is Connection.Checking) {
+            setupShown = true
+            mutable.update { it.copy(tab = Tab.SETUP) }
         }
     }
 
-    fun toggle(snapshot: TransferSnapshot) {
-        when (snapshot.status) {
-            TransferStatus.RUNNING -> downloads.pause(snapshot.id)
-            TransferStatus.PAUSED, TransferStatus.FAILED -> downloads.resume(snapshot.id)
-            TransferStatus.COMPLETED -> Unit
-        }
-        val snapshots = downloads.snapshots()
-        _state.update { it.copy(downloads = snapshots) }
-        syncService(snapshots)
-    }
-
-    private fun resolveAndDownload(entry: ShareSession.Entry) {
-        val current = session ?: return
-        _state.update { it.copy(message = "正在获取下载地址…", error = false) }
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { current.resolve(entry) } }
-            result.fold(
-                onSuccess = { direct ->
-                    val name = direct.fileName().ifBlank { entry.fileName().ifBlank { "download" } }
-                    downloads.start(name, direct.url(), direct.headers())
-                    val snapshots = downloads.snapshots()
-                    syncService(snapshots)
-                    _state.update { it.copy(downloads = snapshots, message = "已创建下载：$name", error = false) }
-                },
-                onFailure = { error ->
-                    _state.update { it.copy(error = true, message = error.message ?: "获取下载地址失败") }
-                }
-            )
-        }
-    }
-
-    private fun syncService(snapshots: List<TransferSnapshot>) {
-        val running = snapshots.any { it.status == TransferStatus.RUNNING }
-        val app = getApplication<Application>()
-        if (!running) {
-            app.stopService(Intent(app, DownloadService::class.java))
-            return
-        }
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = ContextCompat.checkSelfPermission(app, Manifest.permission.POST_NOTIFICATIONS) ==
-                PackageManager.PERMISSION_GRANTED
-            if (!granted) return
-        }
+    private suspend fun refreshTasks() {
         try {
-            ContextCompat.startForegroundService(app, Intent(app, DownloadService::class.java))
-        } catch (_: Exception) {
-            // Notification permission or background limits. The in-app list still tracks progress.
+            val tasks = daemon.tasks()
+            mutable.update { it.copy(tasks = tasks) }
+        } catch (ex: DaemonException) {
+            if (ex.kind != DaemonException.Kind.REJECTED) checkConnection()
         }
     }
 
-    override fun onCleared() {
-        downloads.removeListener(listener)
+    private fun launchAction(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (ex: DaemonException) {
+                fail(ex)
+            }
+        }
+    }
+
+    private fun fail(ex: DaemonException) {
+        mutable.update { it.copy(loading = false, message = ex.message) }
+        if (ex.kind != DaemonException.Kind.REJECTED) {
+            viewModelScope.launch { checkConnection() }
+        }
     }
 }
