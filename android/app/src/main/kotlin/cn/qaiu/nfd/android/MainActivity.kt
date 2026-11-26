@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.DocumentsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
@@ -38,9 +41,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import cn.qaiu.nfd.android.termux.StoragePaths
 import cn.qaiu.nfd.android.termux.TermuxBridge
 import cn.qaiu.nfd.android.ui.BrowseScreen
 import cn.qaiu.nfd.android.ui.ConnectionChip
+import cn.qaiu.nfd.android.ui.HistoryScreen
 import cn.qaiu.nfd.android.ui.SetupScreen
 import cn.qaiu.nfd.android.ui.TasksScreen
 
@@ -56,11 +61,23 @@ class MainActivity : ComponentActivity() {
         viewModel.startBootstrap()
     }
 
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        @Suppress("DEPRECATION")
+        val root = Environment.getExternalStorageDirectory().absolutePath
+        val path = StoragePaths.fromTreeDocument(uri.authority, runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull(), root)
+        if (path == null) {
+            viewModel.toast("无法使用该位置：请选择手机内部存储中的文件夹，或直接填写路径")
+        } else {
+            viewModel.setDownloadDir(path)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) handleShare(intent)
-        setContent { NfdTheme { App(viewModel, ::startDaemon, ::startBootstrap) } }
+        setContent { NfdTheme { App(viewModel, ::startDaemon, ::startBootstrap) { folderPicker.launch(null) } } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -103,7 +120,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun App(viewModel: MainViewModel, startDaemon: () -> Unit, startBootstrap: () -> Unit) {
+private fun App(viewModel: MainViewModel, startDaemon: () -> Unit, startBootstrap: () -> Unit, pickFolder: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -147,10 +164,16 @@ private fun App(viewModel: MainViewModel, startDaemon: () -> Unit, startBootstra
                     label = { Text("下载") },
                 )
                 NavigationBarItem(
+                    selected = state.tab == Tab.HISTORY,
+                    onClick = { viewModel.select(Tab.HISTORY) },
+                    icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
+                    label = { Text("历史") },
+                )
+                NavigationBarItem(
                     selected = state.tab == Tab.SETUP,
                     onClick = { viewModel.select(Tab.SETUP) },
                     icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                    label = { Text("连接") },
+                    label = { Text("设置") },
                 )
             }
         },
@@ -160,7 +183,8 @@ private fun App(viewModel: MainViewModel, startDaemon: () -> Unit, startBootstra
             when (state.tab) {
                 Tab.BROWSE -> BrowseScreen(state, viewModel)
                 Tab.TASKS -> TasksScreen(state, viewModel)
-                Tab.SETUP -> SetupScreen(state, viewModel, startDaemon, startBootstrap)
+                Tab.HISTORY -> HistoryScreen(state, viewModel)
+                Tab.SETUP -> SetupScreen(state, viewModel, startDaemon, startBootstrap, pickFolder)
             }
         }
     }

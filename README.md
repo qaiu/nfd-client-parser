@@ -85,9 +85,20 @@ Termux 的 armv7（`arm`）和 i686 也有 openjdk-21 包，守护进程是纯 J
 
 ### 首次使用
 
-1. 安装 Termux：从 [F-Droid](https://f-droid.org/packages/com.termux/) 或 [GitHub Releases](https://github.com/termux/termux-app/releases) 安装。**Google Play 上的 Termux 版本过旧，无法安装软件包。**
-2. 安装并打开 NFD App，进入「连接」页：
-   - 勾选「允许 App 一键启动/停止」（推荐），点「生成安装命令」→「复制并打开 Termux」。
+1. 安装 Termux（**Google Play 上的 Termux 版本过旧，无法安装软件包**）。App「设置」页里有下面这些链接，可以直接打开或复制：
+
+   | 渠道 | 地址 |
+   | --- | --- |
+   | F-Droid（官方） | <https://f-droid.org/packages/com.termux/> |
+   | GitHub Releases（官方，选 universal 或 arm64-v8a） | <https://github.com/termux/termux-app/releases/latest> |
+   | 清华 TUNA 镜像（F-Droid 版 0.118.3） | <https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/com.termux_1002.apk> |
+   | 南京大学镜像（同上） | <https://mirrors.nju.edu.cn/fdroid/repo/com.termux_1002.apk> |
+   | CERNET 联合镜像（同上，自动选高校节点） | <https://mirrors.cernet.edu.cn/fdroid/repo/com.termux_1002.apk> |
+
+   三个国内镜像是 F-Droid 官方仓库的同步，文件与 F-Droid 上的 0.118.3（versionCode 1002）相同。F-Droid 版和 GitHub 版签名不同，不能互相覆盖安装；镜像链接随 Termux 发布新版本而失效时，到 [TUNA 的 F-Droid 帮助页](https://mirrors.tuna.tsinghua.edu.cn/help/fdroid/) 查找最新文件。
+2. 安装并打开 NFD App，进入「设置」页：
+   - 勾选「允许 App 一键启动/停止」（推荐）。在中国大陆可打开「使用国内镜像下载 OpenJDK」（时区为中国时默认打开），命令会加上 `--mirror china`，安装脚本会切换到 Termux 官方的中国大陆镜像组（清华、中科大、阿里云、北外、南大等，由 `pkg` 测速选择），老版本 Termux 没有镜像组时改用清华源。
+   - 点「生成安装命令」→「复制并打开 Termux」。
    - 在 Termux 中长按粘贴并回车。命令形如：
 
      ```bash
@@ -98,7 +109,18 @@ Termux 的 armv7（`arm`）和 i686 也有 openjdk-21 包，守护进程是纯 J
    - 脚本会执行 `pkg install openjdk-21`（首次约 130MB 下载）、安装守护进程到 `~/.nfd/app`、请求存储权限（系统弹窗点「允许」），然后启动守护进程。
 3. 回到 App 点「重新检测」，显示「已连接」后即可在「解析」页粘贴链接。
 
-下载的文件保存在手机的 **内部存储/Download/nfd**。如果没有授予存储权限，会保存在 Termux 私有目录 `~/.nfd/downloads`，App 会提示。
+下载的文件默认保存在手机的 **内部存储/Download/nfd**。如果没有授予存储权限，会保存在 Termux 私有目录 `~/.nfd/downloads`，App 会提示。
+
+### 设置页
+
+- **下载位置**：可以填写完整路径，或点「选择文件夹」用系统选择器挑选内部存储里的目录（如 Download、Movies）。文件由 Termux 写入，所以守护进程会先创建目录并试写一个临时文件，写不进去会直接报错并保留原来的位置；Android/data 和外置 SD 卡通常不可写。设置保存在 `~/.nfd/daemon.properties`，「恢复默认」回到 Download/nfd，只影响之后添加的任务。
+- **网盘账号**：夸克、UC 的 Cookie，123 网盘的 Token 或账号密码，蓝奏云优享和小飞机的账号密码，城通的 refresh_token。保存在 Termux 的 `~/.nfd/auths.json`（权限 600），解析和直链续期时传给 parser。接口和界面只返回「已填写」，不会把 Cookie、Token、密码读回来；密码类字段留空保存表示保持原值。仓库和安装包里不含任何账号。
+
+### 解析与历史
+
+- 蓝奏云等网盘的链接既可能是目录也可能是单个文件。守护进程先按目录解析，失败或目录为空时自动改用文件解析接口，界面上会注明「单文件分享」；两种方式都失败时才报错，并给出与这个链接更相关的那条原因。
+- 蓝奏云、蓝奏云优享、小飞机的目录每页 50 项，列表底部的「加载更多」会继续获取下一页，「下载已加载」只下载已经列出的文件。
+- 「历史」页保存在 App 私有目录（最多 100 条，同一链接只保留最新一次），每条显示成功或失败；成功的显示网盘、文件数、文件夹数、总大小、首个文件名和时间，失败的显示原因。点一条会回到「解析」页重新解析，可以单条删除或清空。数量只统计根目录里已经加载的页。
 
 ### 日常使用
 
@@ -124,8 +146,8 @@ Termux 的 armv7（`arm`）和 i686 也有 openjdk-21 包，守护进程是纯 J
 pkg install -y openjdk-21 curl
 curl -fLO https://github.com/qaiu/nfd-client-parser/releases/download/v<版本>/nfd-termux-daemon-<版本>.tar.gz
 tar -xzf nfd-termux-daemon-<版本>.tar.gz
-bash nfd-termux/bin/install.sh --bundle nfd-termux-daemon-<版本>.tar.gz
-nfd-termux token   # 把这个令牌填到 App「连接」页的高级设置里
+bash nfd-termux/bin/install.sh --bundle nfd-termux-daemon-<版本>.tar.gz   # 在中国大陆可加 --mirror china
+nfd-termux token   # 把这个令牌填到 App「设置」页的高级设置里
 ```
 
 ### 安全设计
@@ -138,10 +160,11 @@ nfd-termux token   # 把这个令牌填到 App「连接」页的高级设置里
 ## 桌面端使用说明
 
 1. 粘贴分享链接（也可以粘贴整段分享文本，会自动提取链接和「提取码：xxxx」），回车或点「解析」。窗口获得焦点时，如果剪贴板里有分享链接且输入框为空，会自动填入（不会自动解析）。也可以把链接拖进窗口。
-2. 双击文件夹进入，用「上一级」或面包屑返回（已打开过的目录不会重新请求）；双击文件直接下载，或多选后点「下载所选」，「全部下载」下载当前目录的所有文件。
-3. 单文件分享或列不出目录时，用「直接下载」。
+2. 双击文件夹进入，用「上一级」或面包屑返回（已打开过的目录不会重新请求）；双击文件直接下载，或多选后点「下载所选」，「全部下载」下载当前目录的所有文件。目录有多页时底部会出现「加载更多」。
+3. 单文件分享会在目录解析失败后自动按文件解析；也可以用「直接下载」跳过列目录。
 4. 右侧列表显示进度、速度、剩余时间；可以暂停、继续、重试、打开文件、在文件夹中显示、移除（可选同时删除文件）。
-5. 「设置」里可以改下载目录、同时下载的任务数和每个任务的连接数。
+5. 「设置」的「下载」页可以改下载目录（保存前会检查能否写入）、同时下载的任务数和每个任务的连接数；「网盘账号」页填写 Cookie、Token 或账号，保存在数据目录的 `auths.json`，与 Android 的项目相同。
+6. 「历史记录」列出解析过的链接（成功或失败、文件数、总大小、时间），双击或点「重新解析」再次解析，保存在数据目录的 `history.json`。
 
 关闭窗口时未完成的任务会保存，下次打开自动继续。数据位置：
 
@@ -244,6 +267,9 @@ CI（`.github/workflows/build.yml`）：
 - **Android ABI**：APK 按 arm64-v8a、armeabi-v7a、x86_64、x86 拆分，App 本身只有 Compose 的一个小本地库，ABI 主要影响包名和 versionCode。Termux 守护进程是纯 Java，跟随 Termux 自身的架构。
 - **CI 覆盖**：termux-docker 不是真机，CI 只验证 Termux 的 OpenJDK、安装脚本和守护进程 API；Termux 存储权限、`RUN_COMMAND` 授权和 App 界面需要在真机上确认。桌面端的界面在 Linux 上做过手工验证，Windows/macOS 只做了打包后的无界面自检。
 - **网盘侧**：能否解析取决于网盘本身和 parser 的支持情况；部分网盘限制同一直链的并发连接数，遇到失败可以在设置里把每任务连接数调低。
+- **登录信息**：Cookie、Token 和密码以明文 JSON 保存在本机（Android 在 Termux 私有目录，桌面端在用户数据目录），依靠文件权限保护，没有额外加密。
+- **下载位置选择器**：系统选择器只能映射到内部存储和已挂载存储卷的真实路径；云盘等文档提供方没有文件路径，会提示改为手动填写。
+- **Termux 镜像安装包**：国内镜像链接固定指向 0.118.3（versionCode 1002），Termux 发布新版后需要更新链接。
 
 ## 目录
 

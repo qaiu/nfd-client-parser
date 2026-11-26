@@ -7,7 +7,10 @@ import android.content.Context
 import androidx.core.content.edit
 import cn.qaiu.nfd.android.daemon.DaemonClient
 import cn.qaiu.nfd.android.daemon.Endpoint
+import cn.qaiu.nfd.android.history.ParseHistory
+import java.io.File
 import java.security.SecureRandom
+import java.util.TimeZone
 import android.util.Base64
 
 class NfdApp : Application() {
@@ -16,11 +19,14 @@ class NfdApp : Application() {
         private set
     lateinit var daemon: DaemonClient
         private set
+    lateinit var history: ParseHistory
+        private set
 
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
         daemon = DaemonClient({ prefs.endpoint })
+        history = ParseHistory(File(filesDir, "parse-history.json"))
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_SETUP, "Termux 安装", NotificationManager.IMPORTANCE_LOW),
         )
@@ -57,6 +63,11 @@ class Prefs(context: Context) {
         get() = prefs.getString(KEY_LINK, "") ?: ""
         set(value) = prefs.edit { putString(KEY_LINK, value) }
 
+    /** Defaults to on for phones set to a mainland China time zone; the user can switch it. */
+    var useChinaMirror: Boolean
+        get() = prefs.getBoolean(KEY_CHINA_MIRROR, TimeZone.getDefault().id in CHINA_ZONES)
+        set(value) = prefs.edit { putBoolean(KEY_CHINA_MIRROR, value) }
+
     val endpoint: Endpoint get() = Endpoint(host, port, token)
 
     fun regenerateToken(): String = newToken().also { token = it }
@@ -68,6 +79,8 @@ class Prefs(context: Context) {
         private const val KEY_PORT = "port"
         private const val KEY_TOKEN = "token"
         private const val KEY_LINK = "last_link"
+        private const val KEY_CHINA_MIRROR = "china_mirror"
+        private val CHINA_ZONES = setOf("Asia/Shanghai", "Asia/Chongqing", "Asia/Chungking", "Asia/Harbin", "Asia/Urumqi", "PRC")
 
         fun newToken(): String {
             val bytes = ByteArray(24)

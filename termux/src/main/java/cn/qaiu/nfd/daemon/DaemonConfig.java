@@ -51,16 +51,46 @@ final class DaemonConfig {
         return config;
     }
 
-    /** Termux storage symlink when {@code termux-setup-storage} has run, else a private folder. */
     Path effectiveDownloadDir() {
-        if (downloadDir != null) {
-            return downloadDir;
-        }
+        return downloadDir != null ? downloadDir : defaultDownloadDir();
+    }
+
+    /** Termux storage symlink when {@code termux-setup-storage} has run, else a private folder. */
+    Path defaultDownloadDir() {
         Path shared = Paths.get(System.getProperty("user.home"), "storage", "downloads");
         if (Files.isDirectory(shared)) {
             return shared.resolve("nfd");
         }
         return home.resolve("downloads");
+    }
+
+    /**
+     * Switches the folder new downloads go to; blank restores the default. The folder must exist or be
+     * creatable and accept a test file, so a choice Termux cannot write to fails here, not mid-download.
+     */
+    void useDownloadDir(String value) throws IOException {
+        if (value == null || value.isBlank()) {
+            downloadDir = null;
+            return;
+        }
+        String raw = value.trim();
+        if (raw.equals("~") || raw.startsWith("~/")) {
+            raw = System.getProperty("user.home") + raw.substring(1);
+        }
+        Path dir = Paths.get(raw);
+        if (!dir.isAbsolute()) {
+            throw new IllegalArgumentException("请填写完整路径，例如 /storage/emulated/0/Download/nfd");
+        }
+        dir = dir.normalize();
+        try {
+            Files.createDirectories(dir);
+            Path probe = Files.createTempFile(dir, ".nfd-write-test", ".tmp");
+            Files.delete(probe);
+        } catch (IOException | SecurityException ex) {
+            throw new IOException("无法写入 " + dir + "。请确认已在 Termux 中运行 termux-setup-storage 并授权，"
+                    + "且目录不在 Android/data 或外置 SD 卡上", ex);
+        }
+        downloadDir = dir;
     }
 
     boolean downloadDirShared() {

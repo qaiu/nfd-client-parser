@@ -3,12 +3,14 @@ package cn.qaiu.nfd.android
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import cn.qaiu.nfd.android.daemon.AuthProvider
 import cn.qaiu.nfd.android.daemon.DaemonException
 import cn.qaiu.nfd.android.daemon.DaemonSettings
 import cn.qaiu.nfd.android.daemon.Entry
 import cn.qaiu.nfd.android.daemon.Health
 import cn.qaiu.nfd.android.daemon.Listing
 import cn.qaiu.nfd.android.daemon.Task
+import cn.qaiu.nfd.android.history.HistoryItem
 import cn.qaiu.nfd.android.termux.BootstrapService
 import cn.qaiu.nfd.android.termux.TermuxBridge
 import kotlinx.coroutines.Job
@@ -28,7 +30,7 @@ sealed interface Connection {
     data class Online(val health: Health) : Connection
 }
 
-enum class Tab { BROWSE, TASKS, SETUP }
+enum class Tab { BROWSE, TASKS, HISTORY, SETUP }
 
 /** One level of the folder stack; listings are kept so going back is instant. */
 data class Level(val title: String, val folder: Entry?, val listing: Listing)
@@ -40,11 +42,16 @@ data class UiState(
     val password: String = "",
     val levels: List<Level> = emptyList(),
     val loading: Boolean = false,
+    val loadingMore: Boolean = false,
     val selected: Set<String> = emptySet(),
     val tasks: List<Task> = emptyList(),
     val settings: DaemonSettings? = null,
     val message: String? = null,
     val allowAppControl: Boolean = true,
+    val useChinaMirror: Boolean = false,
+    val history: List<HistoryItem> = emptyList(),
+    /** Null until loaded from the daemon, which is where login data lives. */
+    val auths: List<AuthProvider>? = null,
 ) {
     val current: Level? get() = levels.lastOrNull()
     val activeTasks: Int get() = tasks.count { it.status.active }
@@ -54,7 +61,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as NfdApp
     private val daemon = app.daemon
-    private val mutable = MutableStateFlow(UiState(link = app.prefs.lastLink))
+    private val mutable = MutableStateFlow(
+        UiState(link = app.prefs.lastLink, useChinaMirror = app.prefs.useChinaMirror, history = app.history.items()),
+    )
     val state: StateFlow<UiState> = mutable.asStateFlow()
 
     /** Bumped on every new parse so late results from an older link are dropped. */
@@ -88,7 +97,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         pollJob = null
     }
 
-    fun select(tab: Tab) = mutable.update { it.copy(tab = tab) }
+    fun select(tab: Tab) {
+        mutable.update { it.copy(tab = tab) }
+        if (tab == Tab.SETUP && mutable.value.connection is Connection.Online) loadAuths()
+    }
 
     fun setLink(value: String) {
         mutable.update { it.copy(link = value) }
@@ -116,23 +128,73 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             toast("请先粘贴分享链接")
             return
         }
+        val password = mutable.value.password.trim()
         val token = ++generation
         browseJob?.cancel()
         mutable.update { it.copy(levels = emptyList(), selected = emptySet(), loading = true) }
         browseJob = viewModelScope.launch {
             try {
-                val listing = daemon.list(link, mutable.value.password, null)
+                val listing = daemon.list(link, password, null)
                 if (token != generation) return@launch
+                record(HistoryItem.succeeded(link, password, listing))
                 if (listing.entries.isEmpty()) {
                     mutable.update { it.copy(loading = false, message = "没有列出文件，可尝试「直接下载」单文件分享") }
                 } else {
                     mutable.update { it.copy(loading = false, levels = listOf(Level(listing.panName.ifBlank { "根目录" }, null, listing))) }
                 }
             } catch (ex: DaemonException) {
+                if (token != generation) return@launch
+                if (ex.kind == DaemonException.Kind.REJECTED) {
+                    record(HistoryItem.failed(link, password, ex.message ?: "解析失败"))
+                }
+                fail(ex)
+            }
+        }
+    }
+
+    /** Next page of the current folder (Lanzou and a few others return folders 50 rows at a time). */
+    fun loadMore() {
+        val state = mutable.value
+        val level = state.current ?: return
+        if (!level.listing.hasMore || state.loading || state.loadingMore) return
+        val token = generation
+        val link = state.link.trim()
+        val password = state.password.trim()
+        mutable.update { it.copy(loadingMore = true) }
+        viewModelScope.launch {
+            try {
+                val next = daemon.list(link, password, level.folder, level.listing.page + 1, level.listing.nextCursor)
+                if (token != generation) return@launch
+                val merged = level.listing.append(next)
+                mutable.update { s ->
+                    s.copy(loadingMore = false, levels = s.levels.map { if (it === level) it.copy(listing = merged) else it })
+                }
+                if (level.folder == null) {
+                    val history = app.history.update(link, password, merged)
+                    mutable.update { it.copy(history = history) }
+                }
+            } catch (ex: DaemonException) {
+                mutable.update { it.copy(loadingMore = false) }
                 if (token == generation) fail(ex)
             }
         }
     }
+
+    fun reopen(item: HistoryItem) {
+        setLink(item.link)
+        mutable.update { it.copy(password = item.password, tab = Tab.BROWSE) }
+        if (mutable.value.connection is Connection.Online) {
+            parse()
+        } else {
+            toast("尚未连接 Termux 守护进程，连接后点「解析」")
+        }
+    }
+
+    fun removeHistory(item: HistoryItem) = mutable.update { it.copy(history = app.history.remove(item)) }
+
+    fun clearHistory() = mutable.update { it.copy(history = app.history.clear()) }
+
+    private fun record(item: HistoryItem) = mutable.update { it.copy(history = app.history.record(item)) }
 
     fun openFolder(entry: Entry) {
         val state = mutable.value
@@ -194,11 +256,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             toast("请先粘贴分享链接")
             return
         }
+        val link = state.link.trim()
+        val password = state.password.trim()
         mutable.update { it.copy(loading = true) }
-        launchAction {
+        viewModelScope.launch {
             try {
-                val tasks = daemon.downloadDirect(state.link.trim(), state.password)
+                val tasks = daemon.downloadDirect(link, password)
+                val name = tasks.firstOrNull()?.fileName.orEmpty()
+                record(
+                    HistoryItem(
+                        link = link, password = password, time = System.currentTimeMillis(), success = true,
+                        title = name, fileCount = 1, sizeComplete = false, singleFile = true,
+                    ),
+                )
                 mutable.update { it.copy(tasks = tasks, tab = Tab.TASKS, message = "已加入下载") }
+            } catch (ex: DaemonException) {
+                if (ex.kind == DaemonException.Kind.REJECTED) {
+                    record(HistoryItem.failed(link, password, ex.message ?: "解析失败"))
+                }
+                fail(ex)
             } finally {
                 mutable.update { it.copy(loading = false) }
             }
@@ -223,6 +299,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         mutable.update { it.copy(settings = daemon.updateSettings(maxConcurrent, connections), message = "已保存") }
     }
 
+    /** [path] blank restores the default (Download/nfd once Termux has storage access). */
+    fun setDownloadDir(path: String) = launchAction {
+        val settings = daemon.setDownloadDir(path.trim())
+        mutable.update {
+            it.copy(settings = settings, message = if (path.isBlank()) "已恢复默认下载位置" else "新任务将保存到 ${settings.downloadDir}")
+        }
+    }
+
+    fun loadAuths() = viewModelScope.launch {
+        try {
+            val auths = daemon.auths()
+            mutable.update { it.copy(auths = auths) }
+        } catch (ex: DaemonException) {
+            // An older daemon has no /api/auths; the settings card explains that an update is needed.
+            mutable.update { it.copy(auths = emptyList()) }
+        }
+    }
+
+    fun saveAuth(type: String, fields: Map<String, String>) = launchAction {
+        mutable.update { it.copy(auths = daemon.saveAuth(type, fields), message = "已保存登录信息") }
+    }
+
+    fun clearAuth(type: String) = launchAction {
+        mutable.update { it.copy(auths = daemon.clearAuth(type), message = "已清除登录信息") }
+    }
+
+    fun setUseChinaMirror(value: Boolean) {
+        app.prefs.useChinaMirror = value
+        mutable.update { it.copy(useChinaMirror = value) }
+    }
+
     fun saveEndpoint(host: String, port: Int, token: String) {
         app.prefs.host = host
         app.prefs.port = port
@@ -243,7 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopBootstrap() = BootstrapService.stop(getApplication())
 
     fun installCommand(): String? = BootstrapService.state.value?.let {
-        BootstrapService.installCommand(it, app.prefs.token, app.prefs.port, mutable.value.allowAppControl)
+        BootstrapService.installCommand(it, app.prefs.token, app.prefs.port, mutable.value.allowAppControl, mutable.value.useChinaMirror)
     }
 
     fun tokenCommand(): String = "nfd-termux token ${app.prefs.token}"
@@ -296,6 +403,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (connection is Connection.Online) {
             if (!wasOnline) {
                 runCatching { daemon.settings() }.onSuccess { s -> mutable.update { it.copy(settings = s) } }
+                if (mutable.value.tab == Tab.SETUP) loadAuths()
                 if (BootstrapService.state.value?.bundleServed == true) {
                     BootstrapService.stop(getApplication())
                 }

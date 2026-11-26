@@ -2,9 +2,11 @@ package cn.qaiu.nfd.share;
 
 import cn.qaiu.entity.FileInfo;
 import cn.qaiu.entity.ShareLinkInfo;
+import cn.qaiu.parser.FolderPaging;
 import cn.qaiu.parser.IPanTool;
 import cn.qaiu.parser.ParserCreate;
 import cn.qaiu.util.CommonUtils;
+import io.vertx.core.MultiMap;
 import io.vertx.core.json.JsonObject;
 
 import java.net.URLDecoder;
@@ -14,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Local share-link session on top of {@code cn.qaiu:parser}.
@@ -34,10 +37,17 @@ public final class ShareSession {
     private static final String REDIRECT_MARKER = "/v2/redirectUrl/";
     private static final String NOT_IMPLEMENTED = "Not implemented yet";
 
+    private static volatile Function<String, Map<String, String>> credentials = type -> Map.of();
+
     private final ParserCreate created;
 
     private ShareSession(ParserCreate created) {
         this.created = created;
+    }
+
+    /** Login data per parser type (see {@link AuthStore}); read each time a session opens. */
+    public static void useCredentials(Function<String, Map<String, String>> source) {
+        credentials = source == null ? type -> Map.of() : source;
     }
 
     public static ShareSession open(String shareUrl, String password) {
@@ -49,7 +59,14 @@ public final class ShareSession {
         if (password != null && !password.trim().isEmpty()) {
             created.setShareLinkInfoPwd(password.trim());
         }
-        return new ShareSession(created);
+        ShareSession session = new ShareSession(created);
+        Map<String, String> auth = credentials.apply(session.type());
+        if (auth != null && !auth.isEmpty()) {
+            MultiMap auths = MultiMap.caseInsensitiveMultiMap();
+            auth.forEach(auths::set);
+            session.otherParam().put("auths", auths);
+        }
+        return session;
     }
 
     public String type() {
@@ -64,13 +81,32 @@ public final class ShareSession {
         return created.getShareLinkInfo().getSharePassword();
     }
 
-    public synchronized Listing list(String dirId) {
+    public Listing list(String dirId) {
+        return list(dirId, 1, null);
+    }
+
+    /**
+     * One page of a folder. Lanzou, iz and fj folders are paged by the parser; {@code cursor} is the
+     * previous page's {@link Listing#nextCursor()} and only speeds things up.
+     */
+    public synchronized Listing list(String dirId, int page, String cursor) {
         ParserRuntime.start();
         Map<String, Object> other = otherParam();
         if (dirId == null || dirId.isBlank()) {
             other.remove("dirId");
         } else {
             other.put("dirId", dirId);
+        }
+        other.remove(FolderPaging.PAGE_INFO);
+        if (page > 1) {
+            other.put(FolderPaging.PAGE, page);
+        } else {
+            other.remove(FolderPaging.PAGE);
+        }
+        if (page > 1 && cursor != null && !cursor.isBlank()) {
+            other.put(FolderPaging.CURSOR, cursor);
+        } else {
+            other.remove(FolderPaging.CURSOR);
         }
         IPanTool tool = created.createTool();
         try {
@@ -92,13 +128,113 @@ public final class ShareSession {
                     }
                 }
             }
-            return new Listing(panName(), type(), List.copyOf(entries));
+            boolean hasMore = false;
+            String nextCursor = null;
+            Object info = other.get(FolderPaging.PAGE_INFO);
+            if (info instanceof JsonObject json) {
+                hasMore = json.getBoolean("hasMore", false);
+                nextCursor = json.getString("nextCursor");
+            }
+            return new Listing(panName(), type(), List.copyOf(entries), Math.max(1, page), hasMore, nextCursor, false, "");
         } finally {
             closeQuietly(tool);
         }
     }
 
-    public synchronized Listing openFolder(Entry entry) {
+    /**
+     * Root listing for a newly pasted link. Folder APIs reject file shares (Lanzou answers "该链接为蓝奏云
+     * 文件分享") and some fail or come back empty for other reasons, so the share is then parsed as a
+     * single file before an error is shown.
+     */
+    public synchronized Listing browse() {
+        Listing listing = null;
+        RuntimeException listError = null;
+        try {
+            listing = list(null);
+        } catch (RuntimeException ex) {
+            listError = ex;
+        }
+        if (listing != null && !listing.entries().isEmpty()) {
+            return listing;
+        }
+        try {
+            Entry file = parseAsFile();
+            String note;
+            if (listError == null) {
+                note = "目录接口没有返回文件，已按单文件分享解析";
+            } else if (String.valueOf(listError.getMessage()).contains("文件分享")) {
+                note = "单文件分享";
+            } else {
+                note = "目录解析失败（" + ShareErrors.friendly(listError) + "），已按单文件分享解析";
+            }
+            return new Listing(panName(), type(), List.of(file), 1, false, null, true, note);
+        } catch (RuntimeException fileError) {
+            if (listError == null) {
+                return listing;
+            }
+            throw bothFailed(listError, fileError);
+        }
+    }
+
+    private Entry parseAsFile() {
+        ParserRuntime.start();
+        otherParam().remove("paramJson");
+        otherParam().remove("fileInfo");
+        IPanTool tool = created.createTool();
+        String url;
+        try {
+            url = tool.parseSync();
+        } finally {
+            closeQuietly(tool);
+        }
+        if (!isHttp(url)) {
+            throw new IllegalStateException(url == null || url.isBlank() ? "没有解析到下载地址" : url);
+        }
+        long size = -1;
+        String sizeText = "";
+        Object info = otherParam().get("fileInfo");
+        if (info instanceof FileInfo fileInfo) {
+            size = fileInfo.getSize() == null ? -1 : fileInfo.getSize();
+            sizeText = fileInfo.getSizeStr() == null ? "" : fileInfo.getSizeStr();
+        }
+        if (sizeText.isBlank() && size >= 0) {
+            sizeText = formatSize(size);
+        }
+        return new Entry(preferredName(fileNameFromUrl(url)), "", "file", size, sizeText, null, false);
+    }
+
+    /** Surfaces the error that matches what the share actually is, or both when unclear. */
+    static RuntimeException bothFailed(RuntimeException listError, RuntimeException fileError) {
+        String list = ShareErrors.friendly(listError);
+        String file = ShareErrors.friendly(fileError);
+        String listRaw = String.valueOf(listError.getMessage());
+        String fileRaw = String.valueOf(fileError.getMessage());
+        if (listRaw.contains("文件分享") || list.equals(file)) {
+            return fileError;
+        }
+        if (fileRaw.contains("目录分享")) {
+            return listError;
+        }
+        ParseFailure failure = new ParseFailure("目录解析：" + list + "；按单文件解析：" + file, listError);
+        failure.addSuppressed(fileError);
+        return failure;
+    }
+
+    private static String fileNameFromUrl(String url) {
+        String path = url;
+        int query = path.indexOf('?');
+        if (query >= 0) {
+            path = path.substring(0, query);
+        }
+        String name = urlDecode(path.substring(path.lastIndexOf('/') + 1));
+        return name.isBlank() || !name.contains(".") ? "download" : name;
+    }
+
+    public Listing openFolder(Entry entry) {
+        return openFolder(entry, 1, null);
+    }
+
+    public synchronized Listing openFolder(Entry entry, int page, String cursor) {
         if (entry == null || !entry.folder()) {
             throw new IllegalArgumentException("不是文件夹");
         }
@@ -114,7 +250,7 @@ public final class ShareSession {
         if (dirId == null || dirId.isBlank()) {
             dirId = entry.fileId();
         }
-        return list(dirId);
+        return list(dirId, page, cursor);
     }
 
     public synchronized DirectLink resolve(Entry entry) {
@@ -414,7 +550,19 @@ public final class ShareSession {
         return String.format(Locale.US, "%.1f %s", value, units[unit]);
     }
 
-    public record Listing(String panName, String type, List<Entry> entries) {
+    /**
+     * @param singleFile the folder API did not apply and the share was parsed as one file
+     * @param note       why {@code singleFile} happened, for the UI
+     */
+    public record Listing(String panName, String type, List<Entry> entries, int page, boolean hasMore,
+                          String nextCursor, boolean singleFile, String note) {
+    }
+
+    /** Both the folder and the file API failed; the message already reads well in the UI. */
+    public static final class ParseFailure extends RuntimeException {
+        public ParseFailure(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     public record Entry(

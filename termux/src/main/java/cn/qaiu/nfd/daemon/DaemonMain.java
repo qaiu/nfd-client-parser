@@ -1,8 +1,10 @@
 package cn.qaiu.nfd.daemon;
 
 import cn.qaiu.nfd.core.DownloadManager;
+import cn.qaiu.nfd.share.AuthStore;
 import cn.qaiu.nfd.share.ParserRuntime;
 import cn.qaiu.nfd.share.SelfTest;
+import cn.qaiu.nfd.share.ShareSession;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -73,6 +75,8 @@ public final class DaemonMain {
     }
 
     static void run(DaemonConfig config) throws Exception {
+        AuthStore auths = AuthStore.load(config.home.resolve("auths.json"));
+        ShareSession.useCredentials(auths::get);
         ParserBackend backend = new ParserBackend();
         DownloadManager downloads = new DownloadManager(new DownloadManager.Options()
                 .stateDir(config.home.resolve("tasks"))
@@ -80,7 +84,7 @@ public final class DaemonMain {
                 .connections(config.connections)
                 .resumeOnStart(true)
                 .refresher(DaemonServer.refresher(backend)));
-        DaemonServer server = new DaemonServer(config, backend, downloads, version());
+        DaemonServer server = new DaemonServer(config, backend, downloads, auths, version());
         server.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.close();
@@ -133,7 +137,8 @@ public final class DaemonMain {
         DaemonConfig config = DaemonConfig.load(home);
         config.port = 0;
         try (DownloadManager downloads = new DownloadManager(new DownloadManager.Options())) {
-            DaemonServer server = new DaemonServer(config, new ParserBackend(), downloads, version());
+            DaemonServer server = new DaemonServer(config, new ParserBackend(), downloads,
+                    AuthStore.load(home.resolve("auths.json")), version());
             server.start();
             try {
                 HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();

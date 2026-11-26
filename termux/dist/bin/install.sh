@@ -5,18 +5,20 @@
 #   curl -fsSL http://127.0.0.1:PORT/KEY/install.sh | bash -s -- --source http://127.0.0.1:PORT/KEY --token TOKEN
 # From a downloaded release bundle:
 #   tar -xzf nfd-termux-daemon-X.Y.Z.tar.gz && bash nfd-termux/bin/install.sh --bundle nfd-termux-daemon-X.Y.Z.tar.gz --token TOKEN
+# Add --mirror china to download OpenJDK from Termux's mainland China mirror group (TUNA, USTC, Aliyun, ...).
 #
 # Everything runs inside main() so `curl | bash` has read the whole script before pkg can touch stdin.
 
 main() {
     set -euo pipefail
-    local source="${NFD_SOURCE:-}" bundle="" token="" port="" allow_app=0 skip_pkg=0 skip_storage=0 no_start=0
+    local source="${NFD_SOURCE:-}" bundle="" token="" port="" mirror="" allow_app=0 skip_pkg=0 skip_storage=0 no_start=0
     while [ $# -gt 0 ]; do
         case "$1" in
             --source) source="$2"; shift 2 ;;
             --bundle) bundle="$2"; shift 2 ;;
             --token) token="$2"; shift 2 ;;
             --port) port="$2"; shift 2 ;;
+            --mirror) mirror="$2"; shift 2 ;;
             --allow-app-control) allow_app=1; shift ;;
             --skip-packages) skip_pkg=1; shift ;;
             --skip-storage) skip_storage=1; shift ;;
@@ -46,8 +48,15 @@ main() {
     if [ "$skip_pkg" -eq 0 ]; then
         if ! java_ok; then
             if command -v pkg >/dev/null 2>&1; then
+                local pkg_opts=()
+                if [ "$mirror" = china ]; then
+                    use_china_mirrors && pkg_opts=(--check-mirror)
+                elif [ -n "$mirror" ]; then
+                    echo "未知镜像: $mirror（可用: china）" >&2
+                    exit 2
+                fi
                 say "安装 OpenJDK 21: pkg install openjdk-21（首次约 200MB，请耐心等待）"
-                DEBIAN_FRONTEND=noninteractive pkg install -y openjdk-21 </dev/null
+                DEBIAN_FRONTEND=noninteractive pkg "${pkg_opts[@]}" install -y openjdk-21 </dev/null
             else
                 echo "未检测到 Termux 的 pkg，请手动安装 Java 17 或更新版本" >&2
                 exit 1
@@ -127,6 +136,30 @@ main() {
 
 say() {
     printf '\033[1;32m==>\033[0m %s\n' "$*"
+}
+
+# Same switch termux-change-repo makes: pkg then picks a reachable mirror from the official
+# chinese_mainland group (mirrors.tuna.tsinghua.edu.cn, mirrors.ustc.edu.cn, mirrors.aliyun.com, ...).
+use_china_mirrors() {
+    local etc="${PREFIX:-/data/data/com.termux/files/usr}/etc"
+    if [ -d "$etc/termux/mirrors/chinese_mainland" ]; then
+        if [ -L "$etc/termux/chosen_mirrors" ]; then
+            unlink "$etc/termux/chosen_mirrors"
+        fi
+        if [ ! -e "$etc/termux/chosen_mirrors" ]; then
+            ln -s "$etc/termux/mirrors/chinese_mainland" "$etc/termux/chosen_mirrors"
+            say "已切换到 Termux 官方的中国大陆镜像组（可随时运行 termux-change-repo 修改）"
+            return 0
+        fi
+        echo "保留已有的镜像选择（$etc/termux/chosen_mirrors）" >&2
+        return 1
+    fi
+    # Older Termux without mirror groups: point apt at TUNA directly.
+    say "已切换到清华大学 TUNA 镜像（可随时运行 termux-change-repo 修改）"
+    echo "deb https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main stable main" >"$etc/apt/sources.list"
+    export TERMUX_PKG_NO_MIRROR_SELECT=1
+    apt update </dev/null || true
+    return 1
 }
 
 java_ok() {

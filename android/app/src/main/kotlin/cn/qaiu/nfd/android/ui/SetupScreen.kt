@@ -1,5 +1,6 @@
 package cn.qaiu.nfd.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,9 +10,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -30,9 +33,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.qaiu.nfd.android.BuildConfig
@@ -40,6 +46,7 @@ import cn.qaiu.nfd.android.Connection
 import cn.qaiu.nfd.android.MainViewModel
 import cn.qaiu.nfd.android.Prefs
 import cn.qaiu.nfd.android.UiState
+import cn.qaiu.nfd.android.daemon.AuthProvider
 import cn.qaiu.nfd.android.termux.BootstrapService
 import cn.qaiu.nfd.android.termux.TermuxBridge
 import kotlin.math.roundToInt
@@ -57,7 +64,13 @@ fun ConnectionChip(connection: Connection, onClick: () -> Unit) {
 }
 
 @Composable
-fun SetupScreen(state: UiState, viewModel: MainViewModel, startDaemon: () -> Unit, startBootstrap: () -> Unit) {
+fun SetupScreen(
+    state: UiState,
+    viewModel: MainViewModel,
+    startDaemon: () -> Unit,
+    startBootstrap: () -> Unit,
+    pickFolder: () -> Unit,
+) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val bootstrap by BootstrapService.state.collectAsStateWithLifecycle()
@@ -68,18 +81,20 @@ fun SetupScreen(state: UiState, viewModel: MainViewModel, startDaemon: () -> Uni
     ) {
         StatusCard(state, viewModel)
 
+        if (state.connection is Connection.Online) {
+            DownloadSettings(state, viewModel, pickFolder)
+        }
+        AuthSettings(state, viewModel)
+
         Step("1. 安装 Termux", done = termuxInstalled) {
             Text(
-                "解析使用最新的 cn.qaiu:parser，它运行在 Termux 自带的 OpenJDK 中。请从 F-Droid 或 GitHub 安装 Termux（Google Play 上的旧版无法使用）。",
+                "解析使用最新的 cn.qaiu:parser，它运行在 Termux 自带的 OpenJDK 中。请从下面的官方渠道或国内镜像安装 Termux（Google Play 上的旧版无法使用）。",
                 style = MaterialTheme.typography.bodySmall,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (termuxInstalled) {
-                    OutlinedButton(onClick = { TermuxBridge.open(context) }) { Text("打开 Termux") }
-                } else {
-                    Button(onClick = { TermuxBridge.openStore(context) }) { Text("前往 F-Droid") }
-                }
+            if (termuxInstalled) {
+                OutlinedButton(onClick = { TermuxBridge.open(context) }) { Text("打开 Termux") }
             }
+            TermuxLinks(expandedByDefault = !termuxInstalled)
         }
 
         Step("2. 在 Termux 中安装守护进程", done = state.connection is Connection.Online) {
@@ -91,11 +106,21 @@ fun SetupScreen(state: UiState, viewModel: MainViewModel, startDaemon: () -> Uni
                 Text("允许 App 一键启动/停止（开启 allow-external-apps）", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                 Switch(checked = state.allowAppControl, onCheckedChange = viewModel::setAllowAppControl)
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "使用国内镜像下载 OpenJDK（Termux 官方中国大陆镜像组：清华、中科大、阿里云等）",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Switch(checked = state.useChinaMirror, onCheckedChange = viewModel::setUseChinaMirror)
+            }
             val info = bootstrap
             if (info == null) {
                 Button(onClick = startBootstrap) { Text("生成安装命令") }
             } else {
-                val command = BootstrapService.installCommand(info, viewModel.currentToken(), viewModel.currentPort(), state.allowAppControl)
+                val command = BootstrapService.installCommand(
+                    info, viewModel.currentToken(), viewModel.currentPort(), state.allowAppControl, state.useChinaMirror,
+                )
                 SelectionContainer {
                     Text(command, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                 }
@@ -142,9 +167,6 @@ fun SetupScreen(state: UiState, viewModel: MainViewModel, startDaemon: () -> Uni
             }
         }
 
-        if (state.connection is Connection.Online) {
-            DownloadSettings(state, viewModel)
-        }
         EndpointSettings(viewModel)
         Text(
             "NFD ${BuildConfig.VERSION_NAME} · MIT License · 不内置任何网盘账号或 Cookie",
@@ -163,8 +185,9 @@ private fun StatusCard(state: UiState, viewModel: MainViewModel) {
                     val h = connection.health
                     Text("已连接 Termux 守护进程 ${h.version}", fontWeight = FontWeight.Bold)
                     Text("parser ${h.parserVersion} · ${h.java}", style = MaterialTheme.typography.bodySmall)
-                    Text("下载目录：${h.downloadDir}", style = MaterialTheme.typography.bodySmall)
-                    if (!h.downloadDirShared) {
+                    val settings = state.settings
+                    Text("下载目录：${settings?.downloadDir ?: h.downloadDir}", style = MaterialTheme.typography.bodySmall)
+                    if (!h.downloadDirShared && settings?.downloadDirCustom != true) {
                         Text(
                             "文件保存在 Termux 私有目录。在 Termux 中运行 termux-setup-storage 并重启守护进程后，会改存到 Download/nfd。",
                             style = MaterialTheme.typography.bodySmall,
@@ -186,17 +209,187 @@ private fun StatusCard(state: UiState, viewModel: MainViewModel) {
 }
 
 @Composable
-private fun DownloadSettings(state: UiState, viewModel: MainViewModel) {
+private fun TermuxLinks(expandedByDefault: Boolean) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(expandedByDefault) }
+    TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起下载地址" else "Termux 下载地址（官方 / 国内镜像）") }
+    if (!expanded) return
+    Text("官方渠道", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+    TermuxBridge.OFFICIAL_LINKS.forEach { LinkRow(it) }
+    Text("国内镜像（F-Droid 版 Termux 0.118.3 安装包）", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+    TermuxBridge.CHINA_MIRROR_LINKS.forEach { LinkRow(it) }
+    Text(
+        "镜像中的安装包与 F-Droid 官方仓库的文件相同。F-Droid 版和 GitHub 版签名不同，不能互相覆盖安装，" +
+            "已装其中一种时请继续用同一渠道更新。若镜像链接失效，请查看镜像站的 F-Droid 帮助页：",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TextButton(onClick = { TermuxBridge.openUrl(context, TermuxBridge.MIRROR_HELP_URL) }) { Text(TermuxBridge.MIRROR_HELP_URL) }
+}
+
+@Composable
+private fun LinkRow(link: TermuxBridge.DownloadLink) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).clickable { TermuxBridge.openUrl(context, link.url) }.padding(vertical = 4.dp)) {
+            Text(link.label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+            Text(link.url, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        TextButton(onClick = { clipboard.setText(AnnotatedString(link.url)) }) { Text("复制") }
+    }
+}
+
+@Composable
+private fun DownloadSettings(state: UiState, viewModel: MainViewModel, pickFolder: () -> Unit) {
     val settings = state.settings ?: return
     var concurrent by remember(settings) { mutableFloatStateOf(settings.maxConcurrent.toFloat()) }
     var connections by remember(settings) { mutableFloatStateOf(settings.connections.toFloat()) }
+    var path by remember(settings.downloadDir) { mutableStateOf(settings.downloadDir) }
+    val focus = LocalFocusManager.current
     Step("下载设置", done = null) {
+        Text("下载位置", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            settings.downloadDir + if (settings.downloadDirCustom) "" else "（默认）",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            path,
+            { path = it },
+            label = { Text("保存到（完整路径）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                focus.clearFocus()
+                viewModel.setDownloadDir(path)
+            }, enabled = path.isNotBlank() && path.trim() != settings.downloadDir) {
+                Text("应用")
+            }
+            OutlinedButton(onClick = pickFolder) { Text("选择文件夹") }
+            if (settings.downloadDirCustom) {
+                TextButton(onClick = {
+                    focus.clearFocus()
+                    viewModel.setDownloadDir("")
+                }) { Text("恢复默认") }
+            }
+        }
+        Text(
+            "默认：${settings.defaultDownloadDir}。文件由 Termux 写入，请选择内部存储里的目录（如 Download、Movies），" +
+                "并确认已在 Termux 中运行过 termux-setup-storage；Android/data 和外置 SD 卡通常无法写入。新位置只影响之后添加的任务。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider()
         Text("同时下载 ${concurrent.roundToInt()} 个任务", style = MaterialTheme.typography.bodySmall)
         Slider(value = concurrent, onValueChange = { concurrent = it }, valueRange = 1f..5f, steps = 3)
         Text("每个任务 ${connections.roundToInt()} 个连接（部分网盘限制并发，失败时可调低）", style = MaterialTheme.typography.bodySmall)
         Slider(value = connections, onValueChange = { connections = it }, valueRange = 1f..8f, steps = 6)
         Button(onClick = { viewModel.updateSettings(concurrent.roundToInt(), connections.roundToInt()) }) { Text("保存") }
     }
+}
+
+@Composable
+private fun AuthSettings(state: UiState, viewModel: MainViewModel) {
+    var editing by remember { mutableStateOf<AuthProvider?>(null) }
+    val online = state.connection is Connection.Online
+    LaunchedEffect(online) {
+        if (online && state.auths == null) viewModel.loadAuths()
+    }
+    Step("网盘账号（Cookie / Token）", done = null) {
+        Text(
+            "夸克、UC 等网盘需要登录后才能解析或下载。登录信息只保存在本机 Termux 的 ~/.nfd/auths.json（仅 Termux 自己可读），" +
+                "不会上传，也不会显示在下载任务中。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        val auths = state.auths
+        when {
+            !online -> Text("连接 Termux 守护进程后可以填写。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            auths == null -> Text("正在读取…", style = MaterialTheme.typography.bodySmall)
+            auths.isEmpty() -> Text(
+                "当前守护进程版本不支持此功能，请在下面第 2 步重新生成并运行安装命令来更新。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            else -> auths.forEach { provider ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { editing = provider }.padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(provider.name)
+                        Text(
+                            if (provider.configured) "已配置" else "未配置",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (provider.configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { editing = provider }) { Text(if (provider.configured) "修改" else "填写") }
+                }
+            }
+        }
+    }
+    editing?.let { provider ->
+        AuthDialog(
+            provider,
+            onDismiss = { editing = null },
+            onSave = { fields ->
+                viewModel.saveAuth(provider.type, fields)
+                editing = null
+            },
+            onClear = {
+                viewModel.clearAuth(provider.type)
+                editing = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun AuthDialog(provider: AuthProvider, onDismiss: () -> Unit, onSave: (Map<String, String>) -> Unit, onClear: () -> Unit) {
+    val values = remember(provider) { provider.fields.associate { it.key to mutableStateOf(if (it.secret) "" else it.value) } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(provider.name) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(provider.hint, style = MaterialTheme.typography.bodySmall)
+                provider.fields.forEach { field ->
+                    var value by values.getValue(field.key)
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        label = { Text(field.label) },
+                        placeholder = { if (field.hint.isNotBlank() && !(field.secret && field.set)) Text(field.hint) },
+                        supportingText = if (field.secret && field.set) {
+                            { Text("已填写，留空则保持不变") }
+                        } else {
+                            null
+                        },
+                        singleLine = !field.multiline,
+                        minLines = if (field.multiline) 3 else 1,
+                        maxLines = if (field.multiline) 6 else 1,
+                        visualTransformation = if (field.secret && !field.multiline) PasswordVisualTransformation() else VisualTransformation.None,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Text(
+                    "请只填写自己的账号。Cookie 和 Token 相当于登录凭证，不要分享给他人。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(values.mapValues { it.value.value }) }) { Text("保存") } },
+        dismissButton = {
+            Row {
+                if (provider.configured) TextButton(onClick = onClear) { Text("清除") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        },
+    )
 }
 
 @Composable

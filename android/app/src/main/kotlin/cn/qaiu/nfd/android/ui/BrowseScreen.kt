@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -86,7 +87,7 @@ fun BrowseScreen(state: UiState, viewModel: MainViewModel) {
             }
             if (!online) {
                 Text(
-                    "尚未连接 Termux 守护进程，请先到「连接」页完成设置。",
+                    "尚未连接 Termux 守护进程，请先到「设置」页完成连接。",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -116,11 +117,33 @@ fun BrowseScreen(state: UiState, viewModel: MainViewModel) {
                 TextButton(onClick = viewModel::selectAll) { Text("全选") }
             }
         }
+        if (level.listing.note.isNotBlank()) {
+            Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    level.listing.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
+        }
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f)) {
             items(level.listing.entries, key = { it.key }) { entry ->
                 EntryRow(entry, entry.key in state.selected, viewModel)
                 HorizontalDivider()
+            }
+            if (level.listing.hasMore) {
+                item(key = "more") {
+                    Box(Modifier.fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
+                        if (state.loadingMore) {
+                            CircularProgressIndicator(Modifier.size(24.dp))
+                        } else {
+                            OutlinedButton(onClick = viewModel::loadMore, enabled = online) {
+                                Text("加载更多（已加载 ${level.listing.entries.size} 项）")
+                            }
+                        }
+                    }
+                }
             }
         }
         val files = level.listing.entries.filterNot { it.folder }
@@ -130,8 +153,11 @@ fun BrowseScreen(state: UiState, viewModel: MainViewModel) {
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("已选 ${state.selected.size} / ${files.size}", modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = { viewModel.download(files) }, enabled = online) { Text("全部下载") }
+                    Text(
+                        "已选 ${state.selected.size} / ${files.size}" + if (level.listing.hasMore) "+" else "",
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedButton(onClick = { viewModel.download(files) }, enabled = online) { Text(if (level.listing.hasMore) "下载已加载" else "全部下载") }
                     Spacer(Modifier.width(8.dp))
                     Button(onClick = viewModel::downloadSelected, enabled = online && state.selected.isNotEmpty()) { Text("下载选中") }
                 }

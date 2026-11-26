@@ -17,7 +17,26 @@ object TermuxBridge {
     private const val PREFIX = "/data/data/com.termux/files/usr"
     private const val HOME = "/data/data/com.termux/files/home"
     const val FDROID_URL = "https://f-droid.org/packages/com.termux/"
-    const val GITHUB_URL = "https://github.com/termux/termux-app/releases"
+    const val GITHUB_URL = "https://github.com/termux/termux-app/releases/latest"
+
+    data class DownloadLink(val label: String, val url: String)
+
+    val OFFICIAL_LINKS = listOf(
+        DownloadLink("F-Droid（官方推荐）", FDROID_URL),
+        DownloadLink("GitHub Releases（官方，选 universal 或 arm64-v8a）", GITHUB_URL),
+    )
+
+    /**
+     * Copies of the F-Droid build of Termux 0.118.3 (the version F-Droid suggests), byte-identical to
+     * f-droid.org/repo/com.termux_1002.apk. F-Droid keeps a few old builds, so these stay valid until
+     * well after a newer stable release; [MIRROR_HELP_URL] lists the current files.
+     */
+    val CHINA_MIRROR_LINKS = listOf(
+        DownloadLink("清华大学 TUNA 镜像", "https://mirrors.tuna.tsinghua.edu.cn/fdroid/repo/com.termux_1002.apk"),
+        DownloadLink("南京大学 NJU 镜像", "https://mirrors.nju.edu.cn/fdroid/repo/com.termux_1002.apk"),
+        DownloadLink("CERNET 联合镜像（自动选择高校节点）", "https://mirrors.cernet.edu.cn/fdroid/repo/com.termux_1002.apk"),
+    )
+    const val MIRROR_HELP_URL = "https://mirrors.tuna.tsinghua.edu.cn/help/fdroid/"
 
     fun installed(context: Context): Boolean = try {
         context.packageManager.getPackageInfo(PACKAGE, 0)
@@ -35,8 +54,13 @@ object TermuxBridge {
         return true
     }
 
-    fun openStore(context: Context) {
-        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(FDROID_URL)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    fun openStore(context: Context) = openUrl(context, FDROID_URL)
+
+    fun openUrl(context: Context, url: String): Boolean = try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (ex: android.content.ActivityNotFoundException) {
+        false
     }
 
     /** Runs {@code nfd-termux <args>} in the background; returns an error message or null. */

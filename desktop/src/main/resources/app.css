@@ -192,3 +192,13 @@
 .status.error .status-text {
     -fx-text-fill: #b42318;
 }
+
+.history-ok {
+    -fx-text-fill: #1a7f37;
+    -fx-font-weight: bold;
+}
+
+.history-failed {
+    -fx-text-fill: #cf222e;
+    -fx-font-weight: bold;
+}

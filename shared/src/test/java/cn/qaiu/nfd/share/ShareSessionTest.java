@@ -5,6 +5,7 @@ import cn.qaiu.util.CommonUtils;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -93,6 +94,29 @@ class ShareSessionTest {
         assertEquals("1234", ShareSession.extractPassword("https://pan.lanzoui.com/i1 密码:1234"));
         assertEquals("", ShareSession.extractPassword("https://pan.quark.cn/s/abcdef"));
         assertEquals("", ShareSession.extractPassword("pwd 123456789 is too long"));
+    }
+
+    @Test
+    void fallbackPicksTheErrorThatMatchesTheShare() {
+        RuntimeException fileShare = new RuntimeException("蓝奏云-lz: 该链接为蓝奏云文件分享，请使用文件解析接口");
+        RuntimeException needsCode = new RuntimeException("需要访问密码");
+        assertSame(needsCode, ShareSession.bothFailed(fileShare, needsCode));
+
+        RuntimeException folderBlocked = new RuntimeException("蓝奏云返回了访问风控页，请稍后重试");
+        RuntimeException folderShare = new RuntimeException("该链接为蓝奏云目录分享，请使用目录解析接口");
+        assertSame(folderBlocked, ShareSession.bothFailed(folderBlocked, folderShare));
+
+        RuntimeException both = ShareSession.bothFailed(
+                new RuntimeException("目录列表返回非JSON"), new RuntimeException("未找到下载入口"));
+        assertEquals("目录解析：解析失败：目录列表返回非JSON；按单文件解析：解析失败：未找到下载入口", ShareErrors.friendly(both));
+    }
+
+    @Test
+    void loginErrorsPointToSettings() {
+        assertTrue(ShareErrors.friendly(new RuntimeException("夸克要求登录后才能下载。请配置 Cookie（auths.qk.cookie，或请求参数 auth）。"))
+                .startsWith("该网盘需要登录信息"));
+        assertEquals("解析失败：蓝奏云反爬 arg1 Cookie 解析失败",
+                ShareErrors.friendly(new RuntimeException("蓝奏云反爬 arg1 Cookie 解析失败")));
     }
 
     @Test

@@ -28,9 +28,19 @@ final class ParserBackend implements ShareBackend {
     }
 
     @Override
-    public ShareSession.Listing list(String link, String password, ShareSession.Entry folder) {
+    public ShareSession.Listing list(String link, String password, ShareSession.Entry folder, int page, String cursor) {
         ShareSession session = session(link, password);
-        return folder == null ? session.list(null) : session.openFolder(folder);
+        if (folder != null) {
+            return session.openFolder(folder, page, cursor);
+        }
+        return page <= 1 ? session.browse() : session.list(null, page, cursor);
+    }
+
+    @Override
+    public void invalidate() {
+        synchronized (sessions) {
+            sessions.clear();
+        }
     }
 
     @Override
