@@ -270,12 +270,15 @@ final class TasksPane extends VBox {
         ButtonType keep = new ButtonType("仅移除任务", ButtonBar.ButtonData.OK_DONE);
         ButtonType delete = new ButtonType(task.status() == TaskStatus.COMPLETED ? "同时删除文件" : "同时删除已下载部分",
                 ButtonBar.ButtonData.OTHER);
-        Alert alert = new Alert(Alert.AlertType.CONFIRMATION, "", keep, delete, ButtonType.CANCEL);
+        String detail = task.status() == TaskStatus.COMPLETED
+                ? "文件位置：" + task.destination()
+                : "未完成的下载会丢失进度。";
+        Alert alert = new Alert(Alert.AlertType.CONFIRMATION, detail, keep, delete, Ui.CANCEL);
         alert.setTitle("移除下载");
         alert.setHeaderText("移除“" + task.fileName() + "”？");
         alert.initOwner(getScene().getWindow());
         Optional<ButtonType> choice = alert.showAndWait();
-        if (choice.isPresent() && choice.get() != ButtonType.CANCEL) {
+        if (choice.isPresent() && choice.get() != Ui.CANCEL) {
             manager.remove(task.id(), choice.get() == delete);
             sync();
         }

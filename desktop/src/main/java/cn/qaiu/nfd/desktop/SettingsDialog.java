@@ -25,7 +25,7 @@ final class SettingsDialog {
         dialog.initOwner(owner);
         dialog.setTitle("设置");
         dialog.setHeaderText("下载设置");
-        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        dialog.getDialogPane().getButtonTypes().addAll(Ui.OK, Ui.CANCEL);
 
         TextField dir = new TextField(settings.downloadDir().toString());
         dir.setPrefColumnCount(32);
@@ -57,7 +57,7 @@ final class SettingsDialog {
         grid.add(Ui.label("新目录对之后加入的下载生效；连接数对新开始或继续的任务生效。", "muted"), 0, 3, 3, 1);
         dialog.getDialogPane().setContent(grid);
 
-        if (dialog.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
+        if (dialog.showAndWait().orElse(Ui.CANCEL) != Ui.OK) {
             return false;
         }
         String text = dir.getText() == null ? "" : dir.getText().trim();

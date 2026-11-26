@@ -15,6 +15,11 @@ final class Ui {
     private Ui() {
     }
 
+    static final javafx.scene.control.ButtonType OK =
+            new javafx.scene.control.ButtonType("确定", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+    static final javafx.scene.control.ButtonType CANCEL =
+            new javafx.scene.control.ButtonType("取消", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+
     static Button button(String text, String tooltip, Runnable action) {
         Button button = new Button(text);
         if (tooltip != null) {

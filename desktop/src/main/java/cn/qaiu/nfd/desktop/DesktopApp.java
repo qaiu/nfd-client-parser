@@ -14,7 +14,6 @@ import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.Label;
 import javafx.scene.control.SplitPane;
 import javafx.scene.input.Clipboard;
@@ -193,11 +192,11 @@ public final class DesktopApp extends Application {
             return true;
         }
         Alert alert = new Alert(Alert.AlertType.CONFIRMATION,
-                "还有 " + active + " 个下载未完成。退出后进度会保留，下次打开时自动继续。", ButtonType.OK, ButtonType.CANCEL);
+                "还有 " + active + " 个下载未完成。退出后进度会保留，下次打开时自动继续。", Ui.OK, Ui.CANCEL);
         alert.initOwner(stage);
         alert.setTitle("退出");
         alert.setHeaderText("确定退出？");
-        return alert.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK;
+        return alert.showAndWait().orElse(Ui.CANCEL) == Ui.OK;
     }
 
     @Override
