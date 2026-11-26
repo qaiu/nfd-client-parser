@@ -9,7 +9,7 @@ import java.util.Objects;
  * One file to download.
  *
  * @param fileName  preferred file name; a {@code Content-Disposition} name wins when this is blank
- * @param url       direct HTTP(S) URL
+ * @param url       direct HTTP(S) URL; empty means "ask the {@link LinkRefresher} when the task starts"
  * @param headers   request headers the share provider requires (Referer, Cookie, User-Agent ...)
  * @param directory target directory
  * @param source    opaque data handed back to {@link LinkRefresher} when the URL expires

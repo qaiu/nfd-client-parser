@@ -66,6 +66,12 @@ final class TransferRunner {
             abort = false;
             try {
                 checkPaused();
+                if (task.url == null || task.url.isBlank()) {
+                    TaskStatus resolved = resolveInitial();
+                    if (resolved != null) {
+                        return resolved;
+                    }
+                }
                 if (needsProbe()) {
                     probe();
                 }
@@ -132,6 +138,27 @@ final class TransferRunner {
                 }
             }
         }
+    }
+
+    /** Tasks queued without a URL are resolved when they start, so "download all" stays cheap. */
+    private TaskStatus resolveInitial() {
+        LinkRefresher refresher = options.refresher;
+        if (refresher == null) {
+            return fail("缺少下载地址");
+        }
+        manager.update(task, "正在解析下载地址…");
+        try {
+            LinkRefresher.ResolvedLink link = refresher.refresh(task.snapshot());
+            if (link == null || link.url() == null || link.url().isBlank()) {
+                return fail("没有解析到下载地址");
+            }
+            task.url = link.url();
+            task.headers = link.headers();
+        } catch (Exception ex) {
+            return stopRequested() ? TaskStatus.PAUSED : fail(describe(ex));
+        }
+        manager.update(task, "");
+        return null;
     }
 
     private TaskStatus fail(String message) {

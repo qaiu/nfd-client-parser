@@ -153,6 +153,23 @@ class DownloadManagerTest {
     }
 
     @Test
+    void unresolvedTasksAreResolvedWhenTheyStart() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        manager = new DownloadManager(options().refresher(task -> {
+            calls.incrementAndGet();
+            if (task.source().containsKey("broken")) {
+                throw new IllegalStateException("分享已失效");
+            }
+            return new LinkRefresher.ResolvedLink(server.url("/file"), Map.of());
+        }));
+        TaskSnapshot lazy = manager.enqueue(new DownloadRequest("lazy.bin", "", Map.of(), dir, Map.of("link", "x")));
+        assertContent(awaitStatus(lazy.id(), TaskStatus.COMPLETED), 1);
+        TaskSnapshot broken = manager.enqueue(new DownloadRequest("broken.bin", "", Map.of(), dir, Map.of("broken", "1")));
+        assertEquals("分享已失效", awaitStatus(broken.id(), TaskStatus.FAILED).message());
+        assertEquals(2, calls.get());
+    }
+
+    @Test
     void expiredLinkWithoutRefresherFails() throws Exception {
         manager = new DownloadManager(options());
         TaskSnapshot task = enqueue("/gone", "f.bin", Map.of());
