@@ -13,11 +13,12 @@ import javafx.animation.Timeline;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
-import javafx.geometry.Orientation;
+import javafx.geometry.Side;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Label;
-import javafx.scene.control.SplitPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
@@ -25,7 +26,7 @@ import javafx.scene.input.KeyCombination;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.VBox;
+import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -48,6 +49,8 @@ public final class DesktopApp extends Application {
     private DownloadManager manager;
     private BrowsePane browse;
     private TasksPane tasks;
+    private TabPane navigation;
+    private Tab parseTab;
     private Ui.StatusBar status;
     private String lastClipboard = "";
 
@@ -69,35 +72,47 @@ public final class DesktopApp extends Application {
         browse = new BrowsePane(io, this::enqueue, settings::downloadDir, status, history);
         tasks = new TasksPane(manager, settings::downloadDir, status);
 
-        Label title = Ui.label("网盘直链下载", "title");
-        Label subtitle = Ui.label("粘贴分享链接 → 选择文件 → 多线程下载，支持暂停、断点续传和链接过期自动续期", "muted");
-        HBox header = Ui.row(12, new VBox(2, title, subtitle), Ui.spacer(),
-                Ui.button("历史记录", "查看解析过的链接并重新解析", () ->
-                        HistoryDialog.show(stage, history, item -> browse.reparse(item.link(), item.password()), status)),
-                Ui.button("设置", "下载目录、并发、连接数和网盘账号", () -> {
-                    if (SettingsDialog.show(stage, settings, manager, auths,
-                            () -> status.info("网盘登录信息已更新，重新解析后生效"))) {
-                        status.info("设置已保存，下载目录：" + settings.downloadDir());
-                    }
-                }));
+        Label title = Ui.label("NFD 网盘直链", "title");
+        HBox header = Ui.row(12, title, Ui.spacer(), Ui.label("本机解析", "runtime-label"));
         header.getStyleClass().add("header");
 
-        SplitPane split = new SplitPane(browse, tasks);
-        split.setOrientation(Orientation.HORIZONTAL);
-        split.setDividerPositions(0.52);
-        BorderPane.setMargin(split, new Insets(0, 14, 8, 14));
-        BorderPane.setMargin(status, new Insets(0, 14, 12, 14));
+        parseTab = new Tab("解析", browse);
+        Tab downloadTab = new Tab("下载", tasks);
+        HistoryPane historyPane = new HistoryPane(history, item -> {
+            navigation.getSelectionModel().select(parseTab);
+            browse.reparse(item.link(), item.password());
+        }, status);
+        Tab historyTab = new Tab("历史", historyPane);
+        historyTab.setOnSelectionChanged(event -> {
+            if (historyTab.isSelected()) {
+                historyPane.refresh();
+            }
+        });
+        Tab settingsTab = new Tab("设置", new SettingsPane(settings, manager, auths, status));
+        navigation = new TabPane(parseTab, downloadTab, historyTab, settingsTab);
+        navigation.setSide(Side.BOTTOM);
+        navigation.setTabMinWidth(70);
+        navigation.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        navigation.getStyleClass().add("main-navigation");
+        BorderPane.setMargin(navigation, new Insets(0, 16, 0, 16));
+        BorderPane.setMargin(status, new Insets(4, 16, 12, 16));
 
-        BorderPane root = new BorderPane(split, header, null, status, null);
+        BorderPane root = new BorderPane(navigation, header, null, status, null);
         root.getStyleClass().add("app");
+        List<String> installedFonts = Font.getFamilies();
+        List.of("Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC",
+                        "Noto Sans SC", "WenQuanYi Micro Hei").stream()
+                .filter(installedFonts::contains)
+                .findFirst()
+                .ifPresent(family -> root.setStyle("-fx-font-family: \"" + family + "\";"));
         double[] size = settings.window();
         Scene scene = new Scene(root, size[0], size[1]);
         scene.getStylesheets().add(DesktopApp.class.getResource("/app.css").toExternalForm());
         installShortcuts(scene);
         installDragAndDrop(scene);
 
-        stage.setTitle("NFD Client");
-        stage.setMinWidth(900);
+        stage.setTitle("NFD 网盘直链");
+        stage.setMinWidth(780);
         stage.setMinHeight(560);
         stage.setScene(scene);
         stage.focusedProperty().addListener((observable, was, focused) -> {
@@ -124,7 +139,14 @@ public final class DesktopApp extends Application {
         }
         browse.focusLink();
 
-        Timeline ticker = new Timeline(new KeyFrame(Duration.millis(500), event -> tasks.sync()));
+        Timeline ticker = new Timeline(new KeyFrame(Duration.millis(500), event -> {
+            tasks.sync();
+            long active = tasks.activeCount();
+            downloadTab.setText(active > 0 ? "下载 (" + active + ")" : "下载");
+            if (historyTab.isSelected()) {
+                historyPane.refresh();
+            }
+        }));
         ticker.setCycleCount(Timeline.INDEFINITE);
         ticker.play();
     }
@@ -148,8 +170,14 @@ public final class DesktopApp extends Application {
     }
 
     private void installShortcuts(Scene scene) {
-        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN), browse::focusLink);
-        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.F5), browse::parse);
+        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN), () -> {
+            navigation.getSelectionModel().select(parseTab);
+            browse.focusLink();
+        });
+        scene.getAccelerators().put(new KeyCodeCombination(KeyCode.F5), () -> {
+            navigation.getSelectionModel().select(parseTab);
+            browse.parse();
+        });
     }
 
     private void installDragAndDrop(Scene scene) {
@@ -163,6 +191,7 @@ public final class DesktopApp extends Application {
             String text = event.getDragboard().hasUrl() ? event.getDragboard().getUrl() : event.getDragboard().getString();
             boolean ok = text != null && ShareSession.extractUrl(text) != null;
             if (ok) {
+                navigation.getSelectionModel().select(parseTab);
                 browse.setLink(text.trim());
                 browse.parse();
             }

@@ -1,0 +1,67 @@
+--- a/src/DownloadEngineFactory.cc
++++ b/src/DownloadEngineFactory.cc
+@@ -197,24 +197 @@
+-    if (op->get(PREF_RPC_SECRET).empty() && op->get(PREF_RPC_USER).empty()) {
+-      A2_LOG_WARN("Neither --rpc-secret nor a combination of --rpc-user and "
+-                  "--rpc-passwd is set. This is insecure. It is extremely "
+-                  "recommended to specify --rpc-secret with the adequate "
+-                  "secrecy or now deprecated --rpc-user and --rpc-passwd.");
+-    }
+-    bool ok = false;
+-    bool secure = op->getAsBool(PREF_RPC_SECURE);
+-    if (secure) {
+-      A2_LOG_NOTICE("RPC transport will be encrypted.");
+-    }
+-    static int families[] = {AF_INET, AF_INET6};
+-    size_t familiesLength = op->getAsBool(PREF_DISABLE_IPV6) ? 1 : 2;
+-    for (size_t i = 0; i < familiesLength; ++i) {
+-      auto httpListenCommand = make_unique<HttpListenCommand>(
+-          e->newCUID(), e.get(), families[i], secure);
+-      if (httpListenCommand->bindPort(op->getAsInt(PREF_RPC_LISTEN_PORT))) {
+-        e->addCommand(std::move(httpListenCommand));
+-        ok = true;
+-      }
+-    }
+-    if (!ok) {
+-      throw DL_ABORT_EX("Failed to setup RPC server.");
+-    }
++    throw DL_ABORT_EX("RPC is disabled in this standalone downloader.");
+--- a/src/MultiUrlRequestInfo.cc
++++ b/src/MultiUrlRequestInfo.cc
+@@ -183,22 +182,0 @@
+-#ifdef ENABLE_SSL
+-    if (option_->getAsBool(PREF_ENABLE_RPC) &&
+-        option_->getAsBool(PREF_RPC_SECURE)) {
+-      if (option_->blank(PREF_RPC_CERTIFICATE)) {
+-        throw DL_ABORT_EX("Specify --rpc-certificate and --rpc-private-key "
+-                          "options in order to use secure RPC.");
+-      }
+-      // We set server TLS context to the SocketCore before creating
+-      // DownloadEngine instance.
+-      auto minTLSVer = util::toTLSVersion(option_->get(PREF_MIN_TLS_VERSION));
+-      std::shared_ptr<TLSContext> svTlsContext(
+-          TLSContext::make(TLS_SERVER, minTLSVer));
+-      if (!svTlsContext->addCredentialFile(
+-              option_->get(PREF_RPC_CERTIFICATE),
+-              option_->get(PREF_RPC_PRIVATE_KEY))) {
+-        throw DL_ABORT_EX("Loading private key and/or certificate for secure "
+-                          "RPC failed.");
+-      }
+-      SocketCore::setServerTLSContext(svTlsContext);
+-    }
+-#endif // ENABLE_SSL
+-
+@@ -208,8 +185,0 @@
+-
+-#ifdef ENABLE_WEBSOCKET
+-    if (option_->getAsBool(PREF_ENABLE_RPC)) {
+-      e_->setWebSocketSessionMan(make_unique<rpc::WebSocketSessionMan>());
+-      SingletonHolder<Notifier>::instance()->addDownloadEventListener(
+-          e_->getWebSocketSessionMan().get());
+-    }
+-#endif // ENABLE_WEBSOCKET
+--- a/src/LibsslTLSContext.cc
++++ b/src/LibsslTLSContext.cc
+@@ -266 +266 @@
+-  if (ca && sk_X509_num(ca) && !SSL_CTX_add_extra_chain_cert(sslCtx_, ca)) {
++  if (ca && sk_X509_num(ca) && !SSL_CTX_set1_chain(sslCtx_, ca)) {

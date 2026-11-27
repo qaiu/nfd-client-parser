@@ -74,3 +74,20 @@ val daemonBundle by configurations.creating {
 artifacts {
     add(daemonBundle.name, daemonDist)
 }
+
+val embeddedDist by tasks.registering(Zip::class) {
+    archiveFileName.set("daemon.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("embedded"))
+    from(distDir) { include("conf/**") }
+    from(tasks.jar) { into("lib") }
+    from(configurations.runtimeClasspath) { into("lib") }
+}
+
+val embeddedBundle by configurations.creating {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+}
+
+artifacts {
+    add(embeddedBundle.name, embeddedDist)
+}

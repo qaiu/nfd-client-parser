@@ -1,0 +1,10 @@
+# Termux package index snapshot for OpenJDK 21.0.13.1 and its headless JNI dependencies.
+# ABI  SHA-256  path relative to https://packages.termux.dev/apt/termux-main/
+arm64-v8a 0da3a24d558b93c92bcf8d611e0826a99ff96e396b148e6cdf33b47c47c57ff6 pool/main/liba/libandroid-shmem/libandroid-shmem_0.7_aarch64.deb
+arm64-v8a 53d0b84a7ba7459024257cb94d5b136fe13ef858567f65a8064b35950799f2ca pool/main/libc/libc++/libc++_30_aarch64.deb
+arm64-v8a 2cfd61fab6bdc76bc78030199f4b339aa641afd1ff3f21122a7ca018446a7a83 pool/main/o/openjdk-21/openjdk-21_21.0.13.1_aarch64.deb
+arm64-v8a e3027565ae50bcd8ba5113c988b589754ae192c9cc3e6afbe3e4ed7c06b2598e pool/main/z/zlib/zlib_1.4_aarch64.deb
+x86_64 ffa9e4c87467b158b148d0ff92dda796aa038276c2075af3269cdcdb06f25797 pool/main/liba/libandroid-shmem/libandroid-shmem_0.7_x86_64.deb
+x86_64 c9bcd9a8067a19c9c0e4893a72d314a2e37d6b67ce8dd05c67b9bbacad044b4f pool/main/libc/libc++/libc++_30_x86_64.deb
+x86_64 89d87fac2ec35148f76bbacbf425e036847e2207d1679d26d5ec60603e30de27 pool/main/o/openjdk-21/openjdk-21_21.0.13.1_x86_64.deb
+x86_64 55ab8f16e492d6ed03c2e2bf701af52cf54a313442dd7adedd3d6f3e3eba2e4f pool/main/z/zlib/zlib_1.4_x86_64.deb

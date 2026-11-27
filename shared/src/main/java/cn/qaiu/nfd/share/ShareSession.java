@@ -41,7 +41,7 @@ public final class ShareSession {
 
     private final ParserCreate created;
 
-    private ShareSession(ParserCreate created) {
+    ShareSession(ParserCreate created) {
         this.created = created;
     }
 
@@ -158,7 +158,7 @@ public final class ShareSession {
             return listing;
         }
         try {
-            Entry file = parseAsFile();
+            Entry file = fileSession().parseAsFile();
             String note;
             if (listError == null) {
                 note = "目录接口没有返回文件，已按单文件分享解析";
@@ -178,8 +178,6 @@ public final class ShareSession {
 
     private Entry parseAsFile() {
         ParserRuntime.start();
-        otherParam().remove("paramJson");
-        otherParam().remove("fileInfo");
         IPanTool tool = created.createTool();
         String url;
         try {
@@ -254,6 +252,10 @@ public final class ShareSession {
     }
 
     public synchronized DirectLink resolve(Entry entry) {
+        return fileSession().resolveFile(entry);
+    }
+
+    private DirectLink resolveFile(Entry entry) {
         ParserRuntime.start();
         String fallbackName = entry == null || entry.fileName() == null || entry.fileName().isBlank()
                 ? "download"
@@ -293,6 +295,10 @@ public final class ShareSession {
     }
 
     public synchronized DirectLink parseDirect() {
+        return fileSession().parseDirectFile();
+    }
+
+    private DirectLink parseDirectFile() {
         ParserRuntime.start();
         IPanTool tool = created.createTool();
         try {
@@ -304,6 +310,24 @@ public final class ShareSession {
         } finally {
             closeQuietly(tool);
         }
+    }
+
+    /** parseById can replace the share URL and key with the selected file, notably on Lanzou. */
+    private ShareSession fileSession() {
+        ShareLinkInfo source = created.getShareLinkInfo();
+        ParserCreate isolated = ParserCreate.fromType(source.getType());
+        ShareLinkInfo target = isolated.getShareLinkInfo();
+        target.setShareKey(source.getShareKey());
+        target.setShareUrl(source.getShareUrl());
+        target.setStandardUrl(source.getStandardUrl());
+        target.setSharePassword(source.getSharePassword());
+        Map<String, Object> params = new LinkedHashMap<>(otherParam());
+        params.remove("paramJson");
+        params.remove("fileInfo");
+        params.remove("fileName");
+        params.remove("downloadHeaders");
+        target.setOtherParam(params);
+        return new ShareSession(isolated);
     }
 
     public static DownloadRef decodeParserUrl(String parserUrl) {

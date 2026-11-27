@@ -55,8 +55,12 @@ final class DaemonConfig {
         return downloadDir != null ? downloadDir : defaultDownloadDir();
     }
 
-    /** Termux storage symlink when {@code termux-setup-storage} has run, else a private folder. */
+    /** App-owned storage for embedded runtime, or the shared Termux folder if available. */
     Path defaultDownloadDir() {
+        String embedded = System.getenv("NFD_LOCAL_DOWNLOADS");
+        if (embedded != null && !embedded.isBlank()) {
+            return Paths.get(embedded);
+        }
         Path shared = Paths.get(System.getProperty("user.home"), "storage", "downloads");
         if (Files.isDirectory(shared)) {
             return shared.resolve("nfd");
@@ -87,14 +91,19 @@ final class DaemonConfig {
             Path probe = Files.createTempFile(dir, ".nfd-write-test", ".tmp");
             Files.delete(probe);
         } catch (IOException | SecurityException ex) {
-            throw new IOException("无法写入 " + dir + "。请确认已在 Termux 中运行 termux-setup-storage 并授权，"
-                    + "且目录不在 Android/data 或外置 SD 卡上", ex);
+            String hint = System.getenv("NFD_LOCAL_DOWNLOADS") != null
+                    ? "。请选择应用可写入的目录"
+                    : "。请确认已在 Termux 中运行 termux-setup-storage 并授权，且目录不在 Android/data 或外置 SD 卡上";
+            throw new IOException("无法写入 " + dir + hint, ex);
         }
         downloadDir = dir;
     }
 
     boolean downloadDirShared() {
         String path = effectiveDownloadDir().toAbsolutePath().toString();
+        if (System.getenv("NFD_LOCAL_DOWNLOADS") != null && path.contains("/Android/data/")) {
+            return false;
+        }
         return path.contains("/storage/") || path.startsWith("/sdcard");
     }
 

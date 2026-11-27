@@ -33,6 +33,8 @@ final class Task {
     volatile String lastModified;
     /** URL the validators were captured from; If-Range is only sent to the same URL. */
     volatile String validatorUrl;
+    volatile boolean aria2;
+    volatile int aria2Connections;
 
     final List<Segment> segments = new ArrayList<>();
 
@@ -105,7 +107,7 @@ final class Task {
                 eta,
                 message == null ? "" : message,
                 destination == null ? "" : destination,
-                connections.size(),
+                connections.size() + aria2Connections,
                 rangeSupported && total > 0,
                 createdAt,
                 source);

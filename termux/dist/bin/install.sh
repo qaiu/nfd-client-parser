@@ -44,25 +44,27 @@ main() {
     fi
     tar -tzf "$bundle" >/dev/null
 
-    # 2. Termux's default OpenJDK (the parser needs Java 17+).
+    # 2. Runtime packages. aria2 is optional because the daemon has an HTTP downloader.
     if [ "$skip_pkg" -eq 0 ]; then
-        if ! java_ok; then
-            if command -v pkg >/dev/null 2>&1; then
-                local pkg_opts=()
-                if [ "$mirror" = china ]; then
-                    use_china_mirrors && pkg_opts=(--check-mirror)
-                elif [ -n "$mirror" ]; then
-                    echo "未知镜像: $mirror（可用: china）" >&2
-                    exit 2
-                fi
+        if command -v pkg >/dev/null 2>&1 && { ! java_ok || ! command -v aria2c >/dev/null 2>&1; }; then
+            local pkg_opts=()
+            if [ "$mirror" = china ]; then
+                use_china_mirrors && pkg_opts=(--check-mirror)
+            elif [ -n "$mirror" ]; then
+                echo "未知镜像: $mirror（可用: china）" >&2
+                exit 2
+            fi
+            if ! java_ok; then
                 say "安装 OpenJDK 21: pkg install openjdk-21（首次约 200MB，请耐心等待）"
                 DEBIAN_FRONTEND=noninteractive pkg "${pkg_opts[@]}" install -y openjdk-21 </dev/null
-            else
-                echo "未检测到 Termux 的 pkg，请手动安装 Java 17 或更新版本" >&2
-                exit 1
+            fi
+            if ! command -v aria2c >/dev/null 2>&1; then
+                say "安装 aria2 多连接下载器"
+                DEBIAN_FRONTEND=noninteractive pkg "${pkg_opts[@]}" install -y aria2 </dev/null \
+                    || say "aria2 安装失败，将使用内置下载器"
             fi
         fi
-        java_ok || { echo "Java 安装失败" >&2; exit 1; }
+        java_ok || { echo "未找到 Java 17 或更新版本，请先安装 OpenJDK" >&2; exit 1; }
     fi
 
     # 3. Swap in the new version; tasks, config and downloads live outside app/.

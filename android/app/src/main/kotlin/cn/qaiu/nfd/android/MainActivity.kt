@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cn.qaiu.nfd.android.termux.StoragePaths
+import cn.qaiu.nfd.android.runtime.ParserService
 import cn.qaiu.nfd.android.termux.TermuxBridge
 import cn.qaiu.nfd.android.ui.BrowseScreen
 import cn.qaiu.nfd.android.ui.ConnectionChip
@@ -58,7 +59,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        viewModel.startBootstrap()
+        if (BuildConfig.EMBEDDED_RUNTIME) {
+            viewModel.startDaemon()
+        } else {
+            viewModel.startBootstrap()
+        }
     }
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -87,6 +92,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (BuildConfig.EMBEDDED_RUNTIME) ParserService.start(this)
         viewModel.onForeground()
     }
 
@@ -102,7 +108,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startDaemon() {
-        if (TermuxBridge.installed(this) && !TermuxBridge.canRunCommands(this)) {
+        if (BuildConfig.EMBEDDED_RUNTIME && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!BuildConfig.EMBEDDED_RUNTIME && TermuxBridge.installed(this) && !TermuxBridge.canRunCommands(this)) {
             runCommandPermission.launch(TermuxBridge.RUN_COMMAND_PERMISSION)
         } else {
             viewModel.startDaemon()

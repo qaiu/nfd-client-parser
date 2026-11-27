@@ -106,7 +106,7 @@ final class TasksPane extends VBox {
 
     private void configureTable() {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(Ui.label("还没有下载。在左侧选择文件后点击“下载所选”。", "muted"));
+        table.setPlaceholder(Ui.label("还没有下载。到「解析」页选择文件并加入下载。", "muted"));
 
         TableColumn<Row, TaskSnapshot> name = column("文件", 260);
         name.setCellFactory(column -> new TableCell<>() {

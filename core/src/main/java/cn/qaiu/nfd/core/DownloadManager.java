@@ -379,6 +379,9 @@ public final class DownloadManager implements AutoCloseable {
         }
         try {
             if (task.partPath != null && task.status != TaskStatus.COMPLETED) {
+                if (task.aria2) {
+                    Files.deleteIfExists(Aria2Transfer.controlFile(task.partPath));
+                }
                 Files.deleteIfExists(task.partPath);
             }
             if (deleteFile && task.status == TaskStatus.COMPLETED && !task.destination.isEmpty()
@@ -445,6 +448,8 @@ public final class DownloadManager implements AutoCloseable {
         int readTimeoutMillis = 30_000;
         String userAgent = DEFAULT_USER_AGENT;
         LinkRefresher refresher;
+        Path aria2;
+        Path aria2Ca;
         boolean resumeOnStart;
 
         /** Directory for task state; {@code null} keeps tasks in memory only. */
@@ -494,6 +499,13 @@ public final class DownloadManager implements AutoCloseable {
             return this;
         }
 
+        /** Optional aria2c command and PEM trust store. A null trust store uses aria2's default. */
+        public Options aria2(Path executable, Path certificates) {
+            aria2 = executable;
+            aria2Ca = certificates;
+            return this;
+        }
+
         public Options resumeOnStart(boolean value) {
             resumeOnStart = value;
             return this;
@@ -511,6 +523,8 @@ public final class DownloadManager implements AutoCloseable {
             copy.readTimeoutMillis = readTimeoutMillis;
             copy.userAgent = userAgent;
             copy.refresher = refresher;
+            copy.aria2 = aria2;
+            copy.aria2Ca = aria2Ca;
             copy.resumeOnStart = resumeOnStart;
             return copy;
         }

@@ -4,9 +4,11 @@
 parser = "10.2.6"
 junit = "5.11.4"
 okhttp = "5.2.0"
+xz = "1.11"
 
 [libraries]
 parser = { module = "cn.qaiu:parser", version.ref = "parser" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 junit-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }

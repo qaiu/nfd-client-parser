@@ -14,6 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShareSessionTest {
 
     @Test
+    void listsLanzouFolderAgainAfterResolvingAFile() throws Exception {
+        try {
+            assertTrue(ParserSmoke.lanzouPages());
+        } finally {
+            ParserRuntime.stop();
+        }
+    }
+
+    @Test
     void recognizesShareHostsWithoutContactingThem() {
         ShareSession quark = ShareSession.open("请看 https://pan.quark.cn/s/abcdef 谢谢", null);
         assertEquals("qk", quark.type());

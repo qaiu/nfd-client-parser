@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,13 +23,20 @@ final class TestServer implements AutoCloseable {
     final HttpServer server;
     final List<String> ranges = new CopyOnWriteArrayList<>();
     final AtomicInteger requests = new AtomicInteger();
+    final AtomicLong bytesSent = new AtomicLong();
     final AtomicInteger dropsLeft = new AtomicInteger();
     final AtomicInteger errorsLeft = new AtomicInteger();
     final AtomicInteger version = new AtomicInteger(1);
     volatile boolean changeAfterFirst;
     volatile int chunkDelayMillis;
+    private final int size;
 
     TestServer() throws IOException {
+        this(SIZE);
+    }
+
+    TestServer(int size) throws IOException {
+        this.size = size;
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(Executors.newCachedThreadPool());
         server.createContext("/file", ex -> serve(ex, true));
@@ -59,8 +67,12 @@ final class TestServer implements AutoCloseable {
     }
 
     static byte[] content(int version) {
-        byte[] data = new byte[SIZE];
-        for (int i = 0; i < SIZE; i++) {
+        return content(version, SIZE);
+    }
+
+    static byte[] content(int version, int size) {
+        byte[] data = new byte[size];
+        for (int i = 0; i < size; i++) {
             data[i] = expected(i, version);
         }
         return data;
@@ -86,7 +98,7 @@ final class TestServer implements AutoCloseable {
         }
         ex.getResponseHeaders().add("Content-Type", "application/octet-stream");
         long start = 0;
-        long end = SIZE - 1;
+        long end = size - 1;
         int code = 200;
         if (rangeSupport) {
             ex.getResponseHeaders().add("Accept-Ranges", "bytes");
@@ -95,14 +107,14 @@ final class TestServer implements AutoCloseable {
             boolean honour = m != null && m.matches() && (ifRange == null || ifRange.equals(etag));
             if (honour) {
                 start = Long.parseLong(m.group(1));
-                end = m.group(2).isEmpty() ? SIZE - 1 : Math.min(SIZE - 1, Long.parseLong(m.group(2)));
-                if (start >= SIZE) {
-                    ex.getResponseHeaders().add("Content-Range", "bytes */" + SIZE);
+                end = m.group(2).isEmpty() ? size - 1 : Math.min(size - 1, Long.parseLong(m.group(2)));
+                if (start >= size) {
+                    ex.getResponseHeaders().add("Content-Range", "bytes */" + size);
                     status(ex, 416);
                     return;
                 }
                 code = 206;
-                ex.getResponseHeaders().add("Content-Range", "bytes " + start + "-" + end + "/" + SIZE);
+                ex.getResponseHeaders().add("Content-Range", "bytes " + start + "-" + end + "/" + size);
             }
         }
         long length = end - start + 1;
@@ -119,6 +131,7 @@ final class TestServer implements AutoCloseable {
                 }
                 out.write(chunk, 0, n);
                 out.flush();
+                bytesSent.addAndGet(n);
                 pos += n;
                 sent += n;
                 if (drop && sent >= 100 * 1024) {

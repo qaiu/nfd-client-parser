@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
@@ -67,6 +68,7 @@ final class TransferRunner {
         int failures = 0;
         int refreshes = 0;
         int restarts = 0;
+        boolean tryAria2 = true;
         while (true) {
             long before = task.downloaded();
             abort = false;
@@ -79,6 +81,24 @@ final class TransferRunner {
                     }
                 }
                 if (needsProbe()) {
+                    probe();
+                }
+                if (tryAria2 && Aria2Transfer.eligible(task, options)) {
+                    if (!task.aria2) {
+                        task.aria2 = true;
+                        task.replaceSegments(List.of(new Task.Segment(0, task.total - 1, 0)));
+                        manager.update(task, "");
+                    }
+                    if (Aria2Transfer.run(task, options)) {
+                        finish();
+                        return TaskStatus.COMPLETED;
+                    }
+                    checkPaused();
+                    tryAria2 = false;
+                    manager.update(task, "aria2 下载未完成，切换到内置下载器");
+                }
+                if (task.aria2) {
+                    discardAria2();
                     probe();
                 }
                 transfer();
@@ -198,7 +218,7 @@ final class TransferRunner {
     }
 
     private boolean needsProbe() {
-        if (task.partPath == null || !task.rangeSupported || task.total <= 0) {
+        if (task.aria2 || task.partPath == null || !task.rangeSupported || task.total <= 0) {
             return true;
         }
         List<Task.Segment> segments = task.segmentsCopy();
@@ -209,9 +229,11 @@ final class TransferRunner {
     }
 
     private void probe() {
-        HttpURLConnection connection = open("bytes=0-", false);
+        HttpURLConnection connection = open("bytes=0-0", false);
         long total;
         boolean ranges;
+        String etag = null;
+        String lastModified = null;
         try {
             int code = code(connection);
             if (code == 416) {
@@ -234,13 +256,24 @@ final class TransferRunner {
                     total = connection.getContentLengthLong();
                     ranges = false;
                 }
-                task.etag = weakToNull(connection.getHeaderField("ETag"));
-                task.lastModified = connection.getHeaderField("Last-Modified");
-                task.validatorUrl = task.url;
+                etag = weakToNull(connection.getHeaderField("ETag"));
+                lastModified = connection.getHeaderField("Last-Modified");
             }
         } finally {
             release(connection);
         }
+        if (task.aria2 && ranges && total == task.total && task.partPath != null
+                && Files.isRegularFile(task.partPath) && Files.isRegularFile(Aria2Transfer.controlFile(task.partPath))
+                && Objects.equals(task.validatorUrl, task.url) && Objects.equals(task.etag, etag)
+                && Objects.equals(task.lastModified, lastModified)) {
+            return;
+        }
+        if (task.aria2) {
+            discardAria2();
+        }
+        task.etag = etag;
+        task.lastModified = lastModified;
+        task.validatorUrl = task.url;
         task.total = total;
         task.rangeSupported = ranges;
         List<Task.Segment> plan = new ArrayList<>();
@@ -256,7 +289,7 @@ final class TransferRunner {
         try {
             Files.createDirectories(task.directory);
             if (task.partPath == null) {
-                task.partPath = Formats.uniqueTarget(task.directory, displayName() + ".nfdpart");
+                task.partPath = Files.createTempFile(task.directory, ".nfd-", ".nfdpart");
             }
             try (FileChannel channel = FileChannel.open(task.partPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
                 channel.truncate(0);
@@ -265,6 +298,19 @@ final class TransferRunner {
             throw new Failure(Kind.FATAL, "无法创建文件：" + describe(ex));
         }
         manager.update(task, ranges ? "" : (total == 0 ? "" : "服务器不支持断点续传，暂停后将从头下载"));
+    }
+
+    private void discardAria2() {
+        try {
+            if (task.partPath != null) {
+                Files.deleteIfExists(Aria2Transfer.controlFile(task.partPath));
+                Files.deleteIfExists(task.partPath);
+            }
+        } catch (IOException ex) {
+            throw new Failure(Kind.FATAL, "无法清理 aria2 临时文件：" + describe(ex));
+        }
+        task.aria2 = false;
+        task.replaceSegments(List.of());
     }
 
     private void transfer() {

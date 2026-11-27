@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import cn.qaiu.nfd.android.Connection
+import cn.qaiu.nfd.android.BuildConfig
 import cn.qaiu.nfd.android.MainViewModel
 import cn.qaiu.nfd.android.UiState
 import cn.qaiu.nfd.android.daemon.Entry
@@ -87,7 +88,8 @@ fun BrowseScreen(state: UiState, viewModel: MainViewModel) {
             }
             if (!online) {
                 Text(
-                    "尚未连接 Termux 守护进程，请先到「设置」页完成连接。",
+                    if (BuildConfig.EMBEDDED_RUNTIME) "正在准备内置解析。可到「设置」查看运行状态。"
+                    else "尚未连接 Termux 守护进程，请先到「设置」页完成连接。",
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )

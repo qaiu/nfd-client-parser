@@ -22,6 +22,7 @@ import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
+import javafx.scene.input.Clipboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -89,7 +90,19 @@ final class BrowsePane extends VBox {
         directButton = Ui.button("直接下载", "不列目录，直接解析并下载单文件分享", this::downloadDirect);
         busy.setPrefSize(18, 18);
         busy.setVisible(false);
-        HBox input = Ui.row(8, linkField, passwordField, parseButton, directButton, busy);
+        Button paste = Ui.button("粘贴", "从剪贴板填入分享链接", () -> {
+            String text = Clipboard.getSystemClipboard().getString();
+            if (text != null && !text.isBlank()) {
+                setLink(text.trim());
+                passwordField.setText(ShareSession.extractPassword(text));
+            }
+        });
+        Label linkLabel = Ui.label("分享链接");
+        linkLabel.setLabelFor(linkField);
+        Label passwordLabel = Ui.label("提取码");
+        passwordLabel.setLabelFor(passwordField);
+        VBox input = new VBox(8, Ui.row(8, linkLabel, linkField, paste),
+                Ui.row(8, passwordLabel, passwordField, parseButton, directButton, busy));
 
         upButton = Ui.button("上一级", null, this::up);
         upButton.setDisable(true);
@@ -107,6 +120,8 @@ final class BrowsePane extends VBox {
         updateButtons();
 
         noteLabel.setWrapText(true);
+        noteLabel.getStyleClass().add("listing-note");
+        noteLabel.setMaxWidth(Double.MAX_VALUE);
         noteLabel.managedProperty().bind(noteLabel.visibleProperty());
         noteLabel.setVisible(false);
         VBox.setVgrow(table, Priority.ALWAYS);

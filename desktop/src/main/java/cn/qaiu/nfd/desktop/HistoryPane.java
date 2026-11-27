@@ -7,8 +7,6 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
-import javafx.scene.control.Dialog;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
@@ -16,7 +14,6 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
-import javafx.stage.Window;
 
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -26,22 +23,14 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /** Lists earlier parses; picking one fills in the link and parses it again. */
-final class HistoryDialog {
+final class HistoryPane extends VBox {
 
-    private static final ButtonType CLOSE = new ButtonType("关闭", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+    private final ParseHistory history;
+    private final ObservableList<ParseHistory.Item> items = FXCollections.observableArrayList();
 
-    private HistoryDialog() {
-    }
-
-    static void show(Window owner, ParseHistory history, Consumer<ParseHistory.Item> reparse, Ui.StatusBar status) {
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.initOwner(owner);
-        dialog.setTitle("解析历史");
-        dialog.setHeaderText(null);
-        dialog.setResizable(true);
-        dialog.getDialogPane().getButtonTypes().add(CLOSE);
-
-        ObservableList<ParseHistory.Item> items = FXCollections.observableArrayList(history.items());
+    HistoryPane(ParseHistory history, Consumer<ParseHistory.Item> reparse, Ui.StatusBar status) {
+        super(10);
+        this.history = history;
         TableView<ParseHistory.Item> table = new TableView<>(items);
         table.setPlaceholder(Ui.label("还没有解析记录。解析过的链接会保存在本机，选中一条即可重新解析。", "muted"));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -83,7 +72,6 @@ final class HistoryDialog {
         Runnable reopen = () -> {
             ParseHistory.Item item = table.getSelectionModel().getSelectedItem();
             if (item != null) {
-                dialog.close();
                 reparse.accept(item);
             }
         };
@@ -121,7 +109,7 @@ final class HistoryDialog {
                 return;
             }
             Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, "只删除本机的记录，不影响已下载的文件和下载任务。", Ui.OK, Ui.CANCEL);
-            confirm.initOwner(dialog.getDialogPane().getScene().getWindow());
+            confirm.initOwner(getScene().getWindow());
             confirm.setHeaderText("清空解析历史？");
             if (confirm.showAndWait().orElse(Ui.CANCEL) != Ui.OK) {
                 return;
@@ -137,11 +125,16 @@ final class HistoryDialog {
         delete.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull());
 
         VBox.setVgrow(table, Priority.ALWAYS);
-        VBox content = new VBox(10, table, Ui.row(8, Ui.label("失败的记录可悬停查看原因", "muted"), Ui.spacer(),
+        getChildren().addAll(table, Ui.row(8, Ui.label("失败的记录可悬停查看原因", "muted"), Ui.spacer(),
                 clear, delete, again));
-        content.setPrefSize(960, 460);
-        dialog.getDialogPane().setContent(content);
-        dialog.showAndWait();
+        getStyleClass().add("card");
+    }
+
+    void refresh() {
+        List<ParseHistory.Item> latest = history.items();
+        if (!items.equals(latest)) {
+            items.setAll(latest);
+        }
     }
 
     static String summary(ParseHistory.Item item) {
