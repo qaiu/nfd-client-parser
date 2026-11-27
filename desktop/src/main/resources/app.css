@@ -1,63 +1,63 @@
 .root {
-    -fx-font-family: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    -fx-font-family: System;
     -fx-font-size: 13px;
-    -fx-accent: #0b6bcb;
-    -fx-focus-color: #0b6bcb;
-    -fx-faint-focus-color: #0b6bcb22;
+    -fx-accent: #1e6fd9;
+    -fx-focus-color: #1e6fd9;
+    -fx-faint-focus-color: #1e6fd926;
 }
 
 .app {
-    -fx-background-color: #eef2f6;
+    -fx-background-color: #f8f9ff;
 }
 
 .header {
-    -fx-padding: 14 14 12 14;
+    -fx-padding: 16 20 14 20;
 }
 
 .title {
-    -fx-font-size: 20px;
+    -fx-font-size: 22px;
     -fx-font-weight: 700;
-    -fx-text-fill: #1b2430;
+    -fx-text-fill: #191c23;
 }
 
 .muted {
-    -fx-text-fill: #5c6b7a;
+    -fx-text-fill: #515b6b;
 }
 
 .pan {
-    -fx-text-fill: #0b6bcb;
+    -fx-text-fill: #1e6fd9;
     -fx-font-weight: 600;
 }
 
 .crumb-current {
     -fx-font-weight: 600;
-    -fx-text-fill: #1b2430;
+    -fx-text-fill: #191c23;
     -fx-padding: 0 4 0 4;
 }
 
 .hyperlink {
-    -fx-text-fill: #0b6bcb;
+    -fx-text-fill: #1e6fd9;
     -fx-border-color: transparent;
 }
 
 .text-field, .password-field {
     -fx-background-color: white;
     -fx-background-radius: 8;
-    -fx-border-color: #d7dee7;
+    -fx-border-color: #d6deeb;
     -fx-border-radius: 8;
     -fx-padding: 7 10 7 10;
 }
 
 .text-field:focused, .password-field:focused {
-    -fx-border-color: #0b6bcb;
+    -fx-border-color: #1e6fd9;
 }
 
 .button {
     -fx-background-color: white;
-    -fx-border-color: #d7dee7;
-    -fx-border-radius: 8;
-    -fx-background-radius: 8;
-    -fx-padding: 6 12 6 12;
+    -fx-border-color: #d6deeb;
+    -fx-border-radius: 24;
+    -fx-background-radius: 24;
+    -fx-padding: 8 16 8 16;
     -fx-cursor: hand;
 }
 
@@ -66,33 +66,23 @@
 }
 
 .button.accent {
-    -fx-background-color: #0b6bcb;
+    -fx-background-color: #1e6fd9;
     -fx-text-fill: white;
-    -fx-border-color: #0b6bcb;
+    -fx-border-color: #1e6fd9;
 }
 
 .button.accent:hover {
-    -fx-background-color: #0a5fb4;
+    -fx-background-color: #155cba;
 }
 
 .button:disabled {
     -fx-opacity: 0.5;
 }
 
-.split-pane {
-    -fx-background-color: transparent;
-    -fx-padding: 0;
-}
-
-.split-pane > .split-pane-divider {
-    -fx-background-color: transparent;
-    -fx-padding: 0 5 0 5;
-}
-
 .card {
     -fx-background-color: white;
     -fx-background-radius: 12;
-    -fx-border-color: #d7dee7;
+    -fx-border-color: #d6deeb;
     -fx-border-radius: 12;
     -fx-padding: 12;
 }
@@ -100,7 +90,7 @@
 .card-title {
     -fx-font-size: 15px;
     -fx-font-weight: 700;
-    -fx-text-fill: #1b2430;
+    -fx-text-fill: #191c23;
 }
 
 .table-view {
@@ -110,21 +100,21 @@
 }
 
 .table-view .column-header-background {
-    -fx-background-color: #f6f8fb;
+    -fx-background-color: #edf2ff;
 }
 
 .table-row-cell:selected {
-    -fx-background-color: #dcebfb;
+    -fx-background-color: #d9e6ff;
 }
 
 .table-row-cell:selected .text,
 .table-row-cell:selected .label {
-    -fx-fill: #1b2430;
-    -fx-text-fill: #1b2430;
+    -fx-fill: #191c23;
+    -fx-text-fill: #191c23;
 }
 
 .task-name {
-    -fx-text-fill: #1b2430;
+    -fx-text-fill: #191c23;
     -fx-font-weight: 600;
 }
 
@@ -133,7 +123,7 @@
 }
 
 .progress-bar > .bar {
-    -fx-background-color: #0b6bcb;
+    -fx-background-color: #1e6fd9;
     -fx-background-insets: 0;
     -fx-background-radius: 4;
     -fx-padding: 3;
@@ -157,7 +147,7 @@
 }
 
 .state-running {
-    -fx-text-fill: #0b6bcb;
+    -fx-text-fill: #1e6fd9;
 }
 
 .state-completed {
@@ -169,19 +159,19 @@
 }
 
 .state-paused, .state-queued {
-    -fx-text-fill: #5c6b7a;
+    -fx-text-fill: #515b6b;
 }
 
 .status {
     -fx-padding: 7 12 7 12;
     -fx-background-color: white;
     -fx-background-radius: 8;
-    -fx-border-color: #d7dee7;
+    -fx-border-color: #d6deeb;
     -fx-border-radius: 8;
 }
 
 .status-text {
-    -fx-text-fill: #1b2430;
+    -fx-text-fill: #191c23;
 }
 
 .status.error {
@@ -201,4 +191,59 @@
 .history-failed {
     -fx-text-fill: #cf222e;
     -fx-font-weight: bold;
+}
+
+.runtime-label, .listing-note {
+    -fx-background-color: #e7efff;
+    -fx-text-fill: #233b60;
+    -fx-background-radius: 12;
+    -fx-padding: 6 12 6 12;
+}
+
+.main-navigation > .tab-header-area {
+    -fx-padding: 8 0 4 0;
+}
+
+.main-navigation > .tab-header-area > .tab-header-background {
+    -fx-background-color: #f8f9ff;
+}
+
+.main-navigation > .tab-header-area > .headers-region > .tab {
+    -fx-background-color: transparent;
+    -fx-background-radius: 22;
+    -fx-background-insets: 0 4 0 0;
+    -fx-padding: 8 20 8 20;
+    -fx-cursor: hand;
+}
+
+.main-navigation > .tab-header-area > .headers-region > .tab:hover {
+    -fx-background-color: #edf2ff;
+}
+
+.main-navigation > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: #d9e6ff;
+}
+
+.main-navigation > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-text-fill: #40516b;
+    -fx-font-weight: bold;
+}
+
+.main-navigation > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: #173e72;
+}
+
+.settings-scroll, .settings-scroll > .viewport {
+    -fx-background-color: white;
+    -fx-background-radius: 12;
+}
+
+.settings-scroll {
+    -fx-border-color: #d6deeb;
+    -fx-border-radius: 12;
+    -fx-padding: 12;
+}
+
+.settings-tabs > .tab-header-area > .tab-header-background {
+    -fx-background-color: white;
 }

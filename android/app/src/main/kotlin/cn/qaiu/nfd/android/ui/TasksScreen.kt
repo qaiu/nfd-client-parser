@@ -3,6 +3,8 @@ package cn.qaiu.nfd.android.ui
 import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,11 +24,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import cn.qaiu.nfd.android.BuildConfig
 import cn.qaiu.nfd.android.MainViewModel
 import cn.qaiu.nfd.android.UiState
 import cn.qaiu.nfd.android.daemon.Task
@@ -36,29 +40,38 @@ import cn.qaiu.nfd.android.daemon.TaskStatus
 fun TasksScreen(state: UiState, viewModel: MainViewModel) {
     val context = LocalContext.current
     var removing by remember { mutableStateOf<Task?>(null) }
+    var exportTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val task = state.tasks.firstOrNull { it.id == exportTaskId }
+        exportTaskId = null
+        if (uri != null && task != null) viewModel.exportDownload(task, uri)
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = viewModel::pauseAll) { Text("全部暂停") }
             TextButton(onClick = viewModel::resumeAll) { Text("全部继续") }
             TextButton(onClick = viewModel::clearFinished) { Text("清除已完成") }
-            TextButton(onClick = {
-                try {
-                    context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (ex: ActivityNotFoundException) {
-                    viewModel.toast("没有可以打开下载目录的应用")
-                }
-            }) { Text("打开目录") }
+            if (!BuildConfig.EMBEDDED_RUNTIME) {
+                TextButton(onClick = {
+                    try {
+                        context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    } catch (ex: ActivityNotFoundException) {
+                        viewModel.toast("没有可以打开下载目录的应用")
+                    }
+                }) { Text("打开目录") }
+            }
         }
         state.settings?.let {
             Text(
-                "保存到：${it.downloadDir}" + if (it.downloadDirShared) "" else "（Termux 私有目录，运行 termux-setup-storage 后改为 Download/nfd）",
+                "保存到：${it.downloadDir}" + if (it.downloadDirShared || BuildConfig.EMBEDDED_RUNTIME) ""
+                else "（Termux 私有目录，运行 termux-setup-storage 后改为 Download/nfd）",
                 modifier = Modifier.padding(horizontal = 16.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (it.downloadDirShared) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         if (state.tasks.isEmpty()) {
-            EmptyHint("还没有下载任务。下载由 Termux 守护进程执行，关闭 App 后仍会继续。")
+            EmptyHint("还没有下载任务。到「解析」页选择文件并加入下载。")
             return
         }
         LazyColumn(
@@ -66,7 +79,12 @@ fun TasksScreen(state: UiState, viewModel: MainViewModel) {
             contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(state.tasks, key = { it.id }) { task -> TaskCard(task, viewModel) { removing = task } }
+            items(state.tasks, key = { it.id }) { task ->
+                TaskCard(task, viewModel, onRemove = { removing = task }, onExport = {
+                    exportTaskId = task.id
+                    exportFile.launch(task.fileName)
+                })
+            }
         }
     }
     removing?.let { task ->
@@ -85,7 +103,7 @@ fun TasksScreen(state: UiState, viewModel: MainViewModel) {
 }
 
 @Composable
-private fun TaskCard(task: Task, viewModel: MainViewModel, onRemove: () -> Unit) {
+private fun TaskCard(task: Task, viewModel: MainViewModel, onRemove: () -> Unit, onExport: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(task.fileName, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
@@ -106,6 +124,8 @@ private fun TaskCard(task: Task, viewModel: MainViewModel, onRemove: () -> Unit)
                     task.status.active -> TextButton(onClick = { viewModel.pause(task) }) { Text("暂停") }
                     task.status == TaskStatus.FAILED -> TextButton(onClick = { viewModel.resume(task) }) { Text("重试") }
                     task.status.canResume -> TextButton(onClick = { viewModel.resume(task) }) { Text("继续") }
+                    BuildConfig.EMBEDDED_RUNTIME && task.status == TaskStatus.COMPLETED && task.destination.isNotBlank() ->
+                        TextButton(onClick = onExport) { Text("另存为") }
                 }
                 TextButton(onClick = onRemove) { Text("移除") }
             }

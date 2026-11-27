@@ -61,12 +61,15 @@ public final class SelfTest {
             ParserRuntime.start();
             return ParserRuntime.started();
         });
+        check("real Lanzou parser (local HTTP, extraction code and paging)", ParserSmoke::lanzouPages);
         return this;
     }
 
     public SelfTest onlineCheck() {
-        return check("live listing (" + SAMPLE_LINK + ")",
-                () -> !ShareSession.open(SAMPLE_LINK, null).list(null).entries().isEmpty());
+        return check("live Lanzou pages, single-file fallback and direct URL", ParserSmoke::liveLanzouPagesAndFile)
+                .check("live Lanzou folder with extraction code", ParserSmoke::liveLanzouWithCode)
+                .check("live Ctfile directory and PDF download range", ParserSmoke::liveCtfileDirectoryAndFile)
+                .check("live Quark guest direct URL", ParserSmoke::liveQuarkGuest);
     }
 
     public boolean passed() {

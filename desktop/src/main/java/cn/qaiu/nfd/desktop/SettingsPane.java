@@ -2,17 +2,14 @@ package cn.qaiu.nfd.desktop;
 
 import cn.qaiu.nfd.core.DownloadManager;
 import cn.qaiu.nfd.share.AuthStore;
-import javafx.event.ActionEvent;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
-import javafx.scene.control.Dialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
@@ -24,28 +21,18 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
-import javafx.stage.Window;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-final class SettingsDialog {
+final class SettingsPane extends ScrollPane {
 
-    private SettingsDialog() {
-    }
-
-    /** Returns true when the user saved download settings. Login data is saved from its own tab. */
-    static boolean show(Window owner, Settings settings, DownloadManager manager, AuthStore auths, Runnable authsChanged) {
-        Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.initOwner(owner);
-        dialog.setTitle("设置");
-        dialog.setHeaderText(null);
-        dialog.getDialogPane().getButtonTypes().addAll(Ui.OK, Ui.CANCEL);
-
+    SettingsPane(Settings settings, DownloadManager manager, AuthStore auths, Ui.StatusBar status) {
         TextField dir = new TextField(settings.downloadDir().toString());
         dir.setPrefColumnCount(32);
         GridPane.setHgrow(dir, Priority.ALWAYS);
@@ -56,7 +43,7 @@ final class SettingsDialog {
             if (current.isDirectory()) {
                 chooser.setInitialDirectory(current);
             }
-            File picked = chooser.showDialog(dialog.getDialogPane().getScene().getWindow());
+            File picked = chooser.showDialog(getScene().getWindow());
             if (picked != null) {
                 dir.setText(picked.getAbsolutePath());
             }
@@ -71,7 +58,6 @@ final class SettingsDialog {
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(10);
-        grid.setPadding(new Insets(12));
         grid.addRow(0, Ui.label("下载目录"), dir, Ui.row(8, browse, reset));
         grid.addRow(1, Ui.label("同时下载"), Ui.row(8, concurrent, Ui.label("个任务", "muted")));
         grid.addRow(2, Ui.label("每个任务"), Ui.row(8, connections, Ui.label("个连接（网盘限速时调高，被限流时调低）", "muted")));
@@ -83,40 +69,47 @@ final class SettingsDialog {
         });
         dir.setMinWidth(240);
 
-        Tab downloads = new Tab("下载", grid);
-        Tab accounts = new Tab("网盘账号", accountsPane(auths, authsChanged));
-        TabPane tabs = new TabPane(downloads, accounts);
-        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        tabs.setPrefWidth(720);
-        tabs.setPrefHeight(380);
-        dialog.getDialogPane().setContent(tabs);
-
-        Node ok = dialog.getDialogPane().lookupButton(Ui.OK);
-        ok.addEventFilter(ActionEvent.ACTION, event -> {
-            String text = dir.getText() == null ? "" : dir.getText().trim();
-            String problem = text.isEmpty() ? null : checkWritable(Path.of(text));
-            if (problem != null) {
-                tabs.getSelectionModel().select(downloads);
-                Alert alert = new Alert(Alert.AlertType.ERROR, problem, Ui.OK);
-                alert.initOwner(dialog.getDialogPane().getScene().getWindow());
-                alert.setTitle("设置");
-                alert.setHeaderText("下载目录不可用");
-                alert.showAndWait();
-                event.consume();
+        Button save = Ui.accent(Ui.button("保存下载设置", null, () -> {
+            String text = dir.getText().trim();
+            Path path;
+            try {
+                path = text.isEmpty() ? AppPaths.defaultDownloadDir() : Path.of(text);
+            } catch (InvalidPathException ex) {
+                status.error("下载目录格式无效：" + ex.getReason());
+                dir.requestFocus();
+                return;
             }
-        });
+            String problem = checkWritable(path);
+            if (problem != null) {
+                status.error(problem.replace('\n', ' '));
+                dir.requestFocus();
+                return;
+            }
+            try {
+                concurrent.commitValue();
+                connections.commitValue();
+            } catch (NumberFormatException ex) {
+                status.error("请填写有效的并发任务数和连接数");
+                return;
+            }
+            settings.downloadDir(path);
+            settings.downloads(concurrent.getValue(), connections.getValue());
+            manager.setMaxConcurrent(settings.maxConcurrent());
+            manager.setConnections(settings.connections());
+            dir.setText(settings.downloadDir().toString());
+            status.info("设置已保存，下载目录：" + settings.downloadDir());
+        }));
+        VBox downloads = new VBox(12, grid, Ui.row(8, save));
+        downloads.setPadding(new Insets(12));
 
-        if (dialog.showAndWait().orElse(Ui.CANCEL) != Ui.OK) {
-            return false;
-        }
-        String text = dir.getText() == null ? "" : dir.getText().trim();
-        if (!text.isEmpty()) {
-            settings.downloadDir(Path.of(text));
-        }
-        settings.downloads(concurrent.getValue(), connections.getValue());
-        manager.setMaxConcurrent(settings.maxConcurrent());
-        manager.setConnections(settings.connections());
-        return true;
+        TabPane tabs = new TabPane(new Tab("下载位置与连接", downloads),
+                new Tab("网盘账号", accountsPane(auths,
+                        () -> status.info("网盘登录信息已更新，重新解析后生效"))));
+        tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        tabs.getStyleClass().add("settings-tabs");
+        setContent(tabs);
+        setFitToWidth(true);
+        getStyleClass().add("settings-scroll");
     }
 
     /** Null when the folder exists (or was created) and accepts a file; otherwise why not. */

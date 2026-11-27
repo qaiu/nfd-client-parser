@@ -23,4 +23,5 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    inputs.property("aria2c", providers.environmentVariable("NFD_TEST_ARIA2C").orElse(""))
 }

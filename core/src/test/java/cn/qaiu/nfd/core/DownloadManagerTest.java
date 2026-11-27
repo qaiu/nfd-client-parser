@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -102,7 +103,52 @@ class DownloadManagerTest {
         manager.resume(task.id());
         TaskSnapshot done = awaitStatus(task.id(), TaskStatus.COMPLETED);
         assertContent(done, 1);
-        assertTrue(server.ranges.stream().noneMatch(r -> r.equals("bytes=0-")), "resume must not re-probe: " + server.ranges);
+        assertTrue(server.ranges.stream().noneMatch(r -> r.equals("bytes=0-0")), "resume must not re-probe: " + server.ranges);
+    }
+
+    @Test
+    void aria2DownloadsInParallelAndResumesAfterRestart() throws Exception {
+        String command = System.getenv("NFD_TEST_ARIA2C");
+        assumeTrue(command != null && Files.isExecutable(Path.of(command)), "Set NFD_TEST_ARIA2C to a real aria2c");
+        int size = 8 * 1024 * 1024 + 123;
+        server.close();
+        server = new TestServer(size);
+        server.chunkDelayMillis = 30;
+        var aria2Options = options().stateDir(dir.resolve("state")).aria2(Path.of(command), null);
+        manager = new DownloadManager(aria2Options);
+        TaskSnapshot task = enqueue("/file", "aria2.bin", Map.of());
+        await(task.id(), s -> s.downloaded() >= 1024 * 1024 && s.connections() >= 2);
+        manager.pause(task.id());
+        awaitStatus(task.id(), TaskStatus.PAUSED);
+        try (var paths = Files.list(dir)) {
+            assertTrue(paths.anyMatch(path -> path.toString().endsWith(".aria2")));
+        }
+        manager.close();
+        manager = new DownloadManager(aria2Options);
+        server.ranges.clear();
+        server.bytesSent.set(0);
+        // Keep the fixture from writing large unread buffers past aria2's current piece.
+        server.chunkDelayMillis = 3;
+        manager.resume(task.id());
+        var done = awaitStatus(task.id(), TaskStatus.COMPLETED);
+        assertArrayEquals(TestServer.content(1, size), Files.readAllBytes(Path.of(done.destination())));
+        assertTrue(server.ranges.stream().anyMatch(range -> range.matches("bytes=[1-9]\\d*-\\d*")));
+        assertTrue(server.bytesSent.get() < size,
+                () -> "resume sent " + server.bytesSent.get() + " bytes for " + size + ": " + server.ranges);
+        try (var paths = Files.list(dir)) {
+            assertTrue(paths.noneMatch(path -> path.toString().endsWith(".aria2") || path.toString().endsWith(".nfdpart")));
+        }
+    }
+
+    @Test
+    void unavailableAria2FallsBackToJavaWithoutMixingResumeState() throws Exception {
+        int size = 3 * 1024 * 1024 + 123;
+        server.close();
+        server = new TestServer(size);
+        manager = new DownloadManager(options().aria2(dir.resolve("missing-aria2c"), null));
+        var done = awaitStatus(enqueue("/file", "fallback.bin", Map.of()).id(), TaskStatus.COMPLETED);
+        assertArrayEquals(TestServer.content(1, size), Files.readAllBytes(Path.of(done.destination())));
+        assertEquals(2, server.ranges.stream().filter("bytes=0-0"::equals).count());
     }
 
     @Test

@@ -44,6 +44,7 @@ final class TaskStore {
         p.setProperty("etag", nz(task.etag));
         p.setProperty("lastModified", nz(task.lastModified));
         p.setProperty("validatorUrl", nz(task.validatorUrl));
+        p.setProperty("aria2", Boolean.toString(task.aria2));
         p.setProperty("createdAt", Long.toString(task.createdAt));
         StringBuilder segments = new StringBuilder();
         for (Task.Segment segment : task.segmentsCopy()) {
@@ -136,6 +137,7 @@ final class TaskStore {
             task.etag = blankToNull(p.getProperty("etag"));
             task.lastModified = blankToNull(p.getProperty("lastModified"));
             task.validatorUrl = blankToNull(p.getProperty("validatorUrl"));
+            task.aria2 = Boolean.parseBoolean(p.getProperty("aria2"));
             List<Task.Segment> segments = new ArrayList<>();
             String raw = p.getProperty("segments", "");
             if (!raw.isBlank()) {

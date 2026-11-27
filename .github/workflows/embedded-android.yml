@@ -1,0 +1,85 @@
+name: Embedded Android runtime
+
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'shared/**'
+      - 'core/**'
+      - 'termux/**'
+      - '.github/workflows/embedded-android.yml'
+  workflow_dispatch:
+    inputs:
+      live:
+        description: Require real public-share regression tests in addition to offline tests
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: android/runtime/source-bundle.sh "$RUNNER_TEMP/nfd-android-runtime-source.tar"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: embedded-android-source
+          path: ${{ runner.temp }}/nfd-android-runtime-source.tar
+          compression-level: 0
+
+  embedded:
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: '27.3.13750724'
+      ABI: ${{ matrix.abi }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Install aria2c for download regression tests
+        run: sudo apt-get install -y aria2
+      - name: Build runtime and APK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION"
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" \
+            android/runtime/build.sh "$ABI" "$RUNNER_TEMP/nfd-runtime"
+          cd android
+          export NFD_TEST_ARIA2C="$(command -v aria2c)"
+          ./gradlew --no-daemon -PembeddedAbi="$ABI" -PembeddedRuntimeDir="$RUNNER_TEMP/nfd-runtime" \
+            :core:test :daemon:test :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+      - name: Check release size and contents
+        run: |
+          parser="$(sed -n 's/^parser = "\(.*\)"$/\1/p' android/gradle/libs.versions.toml)"
+          apk="android/app/build/outputs/apk/release/app-$ABI-release.apk"
+          android/runtime/verify-apk.py "$apk" "$ABI" "$parser"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$apk"
+      - name: Enable KVM for the test emulator
+        if: matrix.abi == 'x86_64'
+        run: |
+          echo 'KERNEL=="kvm", MODE="0666", GROUP="kvm", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Start the APK without Termux and exercise its packaged parser
+        if: matrix.abi == 'x86_64'
+        uses: ReactiveCircus/android-emulator-runner@v2
+        env:
+          NFD_TEST_LIVE: ${{ inputs.live && '1' || '0' }}
+          NFD_TEST_RECOVERY: '1'
+        with:
+          api-level: 35
+          arch: x86_64
+          script: android/runtime/device-smoke.sh android/app/build/outputs/apk/debug/app-x86_64-debug.apk android/app/build/outputs/apk/release/app-x86_64-release.apk
+      - uses: actions/upload-artifact@v6
+        with:
+          name: embedded-android-${{ matrix.abi }}
+          path: android/app/build/outputs/apk/release/app-*-release.apk

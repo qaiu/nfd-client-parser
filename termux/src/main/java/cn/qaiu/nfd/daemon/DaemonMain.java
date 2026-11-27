@@ -27,7 +27,7 @@ public final class DaemonMain {
         Path home = Paths.get(System.getProperty("user.home"), ".nfd");
         Integer port = null;
         String bind = null;
-        String token = null;
+        String token = System.getenv("NFD_LOCAL_TOKEN");
         String downloadDir = null;
         boolean selfTest = false;
         boolean online = false;
@@ -78,13 +78,35 @@ public final class DaemonMain {
         AuthStore auths = AuthStore.load(config.home.resolve("auths.json"));
         ShareSession.useCredentials(auths::get);
         ParserBackend backend = new ParserBackend();
-        DownloadManager downloads = new DownloadManager(new DownloadManager.Options()
+        DownloadManager.Options options = new DownloadManager.Options()
                 .stateDir(config.home.resolve("tasks"))
                 .maxConcurrent(config.maxConcurrent)
                 .connections(config.connections)
                 .resumeOnStart(true)
-                .refresher(DaemonServer.refresher(backend)));
+                .refresher(DaemonServer.refresher(backend));
+        String aria2Path = System.getenv("NFD_ARIA2C");
+        String certificates = System.getenv("NFD_ARIA2C_CA");
+        if (aria2Path == null && isTermux()) {
+            aria2Path = Path.of(System.getenv("PREFIX"), "bin", "aria2c").toString();
+        }
+        if (aria2Path != null && Files.isExecutable(Path.of(aria2Path))) {
+            options.aria2(Path.of(aria2Path), certificates == null ? null : Path.of(certificates));
+        }
+        DownloadManager downloads = new DownloadManager(options);
         DaemonServer server = new DaemonServer(config, backend, downloads, auths, version());
+        boolean embedded = System.getenv("NFD_LOCAL_DOWNLOADS") != null;
+        if (embedded) {
+            System.out.println("NFD_RUNTIME daemon-init");
+            if ("1".equals(System.getenv("NFD_VERIFY_STARTUP"))) {
+                System.out.println("NFD_RUNTIME verify-start");
+                if (!new SelfTest(System.out).runtimeChecks().passed()) {
+                    System.out.println("NFD_RUNTIME verify-failed");
+                    throw new IllegalStateException("Embedded parser startup self-test failed");
+                }
+                System.out.println("NFD_RUNTIME verify-passed");
+            }
+            ParserRuntime.start();
+        }
         server.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.close();
@@ -93,9 +115,13 @@ public final class DaemonMain {
         }, "nfd-shutdown-hook"));
         System.out.println("nfd-termux " + version() + " (parser " + ParserRuntime.parserVersion() + ") listening on "
                 + config.bind + ":" + server.port() + ", downloads -> " + config.effectiveDownloadDir());
-        Thread warmup = new Thread(ParserRuntime::start, "nfd-warmup");
-        warmup.setDaemon(true);
-        warmup.start();
+        if (embedded) {
+            System.out.println("NFD_RUNTIME daemon-ready");
+        } else {
+            Thread warmup = new Thread(ParserRuntime::start, "nfd-warmup");
+            warmup.setDaemon(true);
+            warmup.start();
+        }
         server.awaitStop();
         downloads.close();
         ParserRuntime.stop();

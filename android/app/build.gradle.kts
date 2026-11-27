@@ -19,6 +19,15 @@ fun versionCodeOf(version: String): Int {
 val abiCodes = linkedMapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
 
 val releaseKeystore: String? = System.getenv("NFD_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
+val embeddedAbi = providers.gradleProperty("embeddedAbi").orNull
+val embeddedRuntimeDir = providers.gradleProperty("embeddedRuntimeDir").orNull?.let(rootProject::file)
+require(embeddedAbi == null || embeddedAbi in setOf("arm64-v8a", "x86_64")) { "Unsupported embeddedAbi: $embeddedAbi" }
+if (embeddedAbi != null) {
+    require(embeddedRuntimeDir?.resolve("assets/runtime-$embeddedAbi.zip.xz")?.isFile == true &&
+        embeddedRuntimeDir.resolve("jniLibs/$embeddedAbi/libnfd_runtime.so").isFile) {
+        "Build the $embeddedAbi runtime first and point -PembeddedRuntimeDir at its output."
+    }
+}
 
 android {
     namespace = "cn.qaiu.nfd.android"
@@ -30,6 +39,8 @@ android {
         targetSdk = 35
         versionCode = versionCodeOf(appVersion).coerceAtLeast(1)
         versionName = appVersion
+        buildConfigField("boolean", "EMBEDDED_RUNTIME", (embeddedAbi != null).toString())
+        buildConfigField("String", "RUNTIME_ABI", "\"${embeddedAbi.orEmpty()}\"")
     }
 
     signingConfigs {
@@ -68,21 +79,32 @@ android {
     }
 
     androidResources {
-        noCompress += "tgz"
+        noCompress += listOf("tgz", "zip", "xz")
     }
 
     splits {
         abi {
             isEnable = true
             reset()
-            include(*abiCodes.keys.toTypedArray())
-            isUniversalApk = true
+            include(*(embeddedAbi?.let(::listOf) ?: abiCodes.keys).toTypedArray())
+            isUniversalApk = embeddedAbi == null
         }
     }
 
     packaging {
         resources {
             excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        }
+        if (embeddedAbi != null) {
+            jniLibs.useLegacyPackaging = true
+            jniLibs.keepDebugSymbols += setOf("**/libnfd_runtime.so", "**/libnfd_aria2c.so")
+        }
+    }
+
+    if (embeddedRuntimeDir != null) {
+        sourceSets.named("main") {
+            assets.srcDir(embeddedRuntimeDir.resolve("assets"))
+            jniLibs.srcDir(embeddedRuntimeDir.resolve("jniLibs"))
         }
     }
 }
@@ -92,12 +114,18 @@ val daemonBundle by configurations.creating {
     isCanBeResolved = true
 }
 
-/** Puts the Termux daemon bundle and installer into assets/termux for the in-app bootstrap server. */
+val embeddedBundle by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = embeddedAbi != null
+}
+
+/** Generates the daemon assets consumed by the selected Android distribution. */
 abstract class DaemonAssetsTask : DefaultTask() {
     @get:InputFiles
     abstract val bundle: ConfigurableFileCollection
 
     @get:InputFile
+    @get:Optional
     abstract val installer: RegularFileProperty
 
     @get:OutputDirectory
@@ -105,19 +133,29 @@ abstract class DaemonAssetsTask : DefaultTask() {
 
     @TaskAction
     fun copy() {
-        val target = outputDir.get().asFile.resolve("termux")
+        val target = outputDir.get().asFile
         target.deleteRecursively()
         target.mkdirs()
         val archive = bundle.singleFile
-        // AGP unpacks *.gz assets while merging, so the bundle is stored as .tgz.
-        Files.copy(archive.toPath(), target.resolve("nfd-termux-daemon.tgz").toPath(), StandardCopyOption.REPLACE_EXISTING)
-        Files.copy(installer.get().asFile.toPath(), target.resolve("install.sh").toPath(), StandardCopyOption.REPLACE_EXISTING)
+        val script = installer.orNull?.asFile
+        if (script == null) {
+            Files.copy(archive.toPath(), target.resolve("daemon.zip").toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } else {
+            val termux = target.resolve("termux").apply { mkdirs() }
+            // AGP unpacks *.gz assets while merging, so the bundle is stored as .tgz.
+            Files.copy(archive.toPath(), termux.resolve("nfd-termux-daemon.tgz").toPath(), StandardCopyOption.REPLACE_EXISTING)
+            Files.copy(script.toPath(), termux.resolve("install.sh").toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 }
 
 val daemonAssets = tasks.register<DaemonAssetsTask>("daemonAssets") {
-    bundle.from(daemonBundle)
-    installer.set(rootProject.layout.projectDirectory.file("../termux/dist/bin/install.sh"))
+    if (embeddedAbi == null) {
+        bundle.from(daemonBundle)
+        installer.set(rootProject.layout.projectDirectory.file("../termux/dist/bin/install.sh"))
+    } else {
+        bundle.from(embeddedBundle)
+    }
 }
 
 androidComponents {
@@ -133,8 +171,10 @@ androidComponents {
 
 dependencies {
     daemonBundle(project(path = ":daemon", configuration = "daemonBundle"))
+    embeddedBundle(project(path = ":daemon", configuration = "embeddedBundle"))
 
     implementation(libs.okhttp)
+    implementation(libs.xz)
 
     val composeBom = platform("androidx.compose:compose-bom:2025.02.00")
     implementation(composeBom)

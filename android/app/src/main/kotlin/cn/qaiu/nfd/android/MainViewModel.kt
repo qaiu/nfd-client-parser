@@ -1,6 +1,7 @@
 package cn.qaiu.nfd.android
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import cn.qaiu.nfd.android.daemon.AuthProvider
@@ -11,9 +12,11 @@ import cn.qaiu.nfd.android.daemon.Health
 import cn.qaiu.nfd.android.daemon.Listing
 import cn.qaiu.nfd.android.daemon.Task
 import cn.qaiu.nfd.android.history.HistoryItem
+import cn.qaiu.nfd.android.runtime.ParserService
 import cn.qaiu.nfd.android.termux.BootstrapService
 import cn.qaiu.nfd.android.termux.TermuxBridge
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +24,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.IOException
 
 sealed interface Connection {
     data object Checking : Connection
@@ -70,6 +76,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var generation = 0
     private var browseJob: Job? = null
     private var pollJob: Job? = null
+    private var parseWhenReady = false
     /** The setup tab opens by itself once, the first time the daemon is unreachable. */
     private var setupShown = false
 
@@ -103,6 +110,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLink(value: String) {
+        parseWhenReady = false
         mutable.update { it.copy(link = value) }
         app.prefs.lastLink = value
     }
@@ -118,8 +126,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val url = Regex("https?://[^\\s，。）】]+").find(text)?.value ?: text.trim()
         val password = Regex("(?:提取码|密码|访问码|pwd)[:：\\s]*([A-Za-z0-9]{3,8})").find(text)?.groupValues?.get(1)
         setLink(url)
-        mutable.update { it.copy(tab = Tab.BROWSE, password = password ?: it.password) }
-        parse()
+        mutable.update { it.copy(tab = Tab.BROWSE, password = password.orEmpty()) }
+        if (BuildConfig.EMBEDDED_RUNTIME && mutable.value.connection !is Connection.Online) {
+            parseWhenReady = true
+        } else {
+            parse()
+        }
     }
 
     fun parse() {
@@ -295,6 +307,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearFinished() = launchAction { mutable.update { it.copy(tasks = daemon.clearFinished()) } }
 
+    fun exportDownload(task: Task, uri: Uri) = viewModelScope.launch {
+        try {
+            withContext(Dispatchers.IO) {
+                File(task.destination).inputStream().use { source ->
+                    val output = app.contentResolver.openOutputStream(uri, "wt")
+                        ?: throw IOException("无法写入选择的位置")
+                    output.use { source.copyTo(it) }
+                }
+            }
+            toast("已导出 ${task.fileName}")
+        } catch (ex: IOException) {
+            toast("导出失败：${ex.message ?: task.fileName}")
+        } catch (ex: SecurityException) {
+            toast("无法写入选择的位置")
+        }
+    }
+
     fun updateSettings(maxConcurrent: Int, connections: Int) = launchAction {
         mutable.update { it.copy(settings = daemon.updateSettings(maxConcurrent, connections), message = "已保存") }
     }
@@ -362,6 +391,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun currentToken(): String = app.prefs.token
 
     fun startDaemon() {
+        if (BuildConfig.EMBEDDED_RUNTIME) {
+            ParserService.start(app)
+            recheck()
+            return
+        }
         val error = TermuxBridge.runDaemonCommand(getApplication(), "start")
         if (error != null) {
             toast(error + "。也可以在 Termux 中手动运行 nfd-termux start")
@@ -393,6 +427,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (health.authorized) Connection.Online(health) else Connection.Unauthorized
         } catch (ex: DaemonException) {
             when {
+                BuildConfig.EMBEDDED_RUNTIME -> {
+                    val error = ParserService.error.value
+                    if (error == null) Connection.Checking else Connection.Offline(error)
+                }
                 app.prefs.host == Prefs.DEFAULT_HOST && !TermuxBridge.installed(app) -> Connection.TermuxMissing
                 ex.kind == DaemonException.Kind.UNAUTHORIZED -> Connection.Unauthorized
                 else -> Connection.Offline(ex.message ?: "未连接")
@@ -401,6 +439,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val wasOnline = mutable.value.connection is Connection.Online
         mutable.update { it.copy(connection = connection) }
         if (connection is Connection.Online) {
+            if (parseWhenReady) {
+                parseWhenReady = false
+                mutable.update { it.copy(tab = Tab.BROWSE) }
+                parse()
+            }
             if (!wasOnline) {
                 runCatching { daemon.settings() }.onSuccess { s -> mutable.update { it.copy(settings = s) } }
                 if (mutable.value.tab == Tab.SETUP) loadAuths()
