@@ -19,6 +19,11 @@ fun versionCodeOf(version: String): Int {
 val abiCodes = linkedMapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
 
 val releaseKeystore: String? = System.getenv("NFD_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
+if (releaseKeystore != null) {
+    logger.lifecycle("Signing release APKs with the release keystore.")
+} else {
+    logger.lifecycle("No NFD_KEYSTORE_FILE; signing release APKs with the debug key.")
+}
 
 android {
     namespace = "cn.qaiu.nfd.android"
