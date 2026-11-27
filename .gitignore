@@ -16,3 +16,10 @@ captures/
 *.ap_
 android/app/src/main/jniLibs/**/*.so
 desktop/target/
+
+# Android / Java signing material — never commit
+*.jks
+*.keystore
+*.p12
+*.password
+keystore.base64

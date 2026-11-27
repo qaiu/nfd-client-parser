@@ -212,7 +212,7 @@ cd android
 
 `android/daemon` 模块编译 `termux/` 和 `shared/` 的源码并打成守护进程包，`:app` 构建时会把它和 `install.sh` 放进 APK 的 `assets/termux/`。
 
-没有配置签名时，release APK 使用调试密钥签名，可以安装测试，但不适合分发。正式签名通过环境变量提供：`NFD_KEYSTORE_FILE`、`NFD_KEYSTORE_PASSWORD`、`NFD_KEY_ALIAS`、`NFD_KEY_PASSWORD`。
+没有配置签名时，release APK 使用调试密钥签名，可以安装测试，但不适合分发。正式签名通过环境变量提供：`NFD_KEYSTORE_FILE`、`NFD_KEYSTORE_PASSWORD`、`NFD_KEY_ALIAS`、`NFD_KEY_PASSWORD`。从调试签名包升级到正式签名包时需要先卸载再安装。
 
 版本号：`versionName` 来自仓库根目录的 `VERSION`；`versionCode = (主×10000 + 次×100 + 修订) × 10 + ABI 序号`（universal 0、armeabi-v7a 1、arm64-v8a 2、x86 3、x86_64 4），同一版本的各 ABI 包可以同时上架。
 
@@ -239,7 +239,7 @@ CI（`.github/workflows/build.yml`）：
 人工发布一个正式版本：
 
 1. 在合并到 `main` 的 PR 里修改 `VERSION` 和 `desktop/pom.xml` 的 `<revision>`，例如都改为 `0.3.0`。
-2. （可选）在仓库 Settings → Secrets → Actions 中配置 Android 签名：`NFD_KEYSTORE_BASE64`（`base64 -w0 release.jks` 的结果）、`NFD_KEYSTORE_PASSWORD`、`NFD_KEY_ALIAS`、`NFD_KEY_PASSWORD`。不配置时 APK 为调试签名，Release 说明里应注明。
+2. Android 正式签名使用仓库 Secrets：`NFD_KEYSTORE_BASE64`（PKCS12 或 JKS 的 `base64 -w0` 结果）、`NFD_KEYSTORE_PASSWORD`、`NFD_KEY_ALIAS`、`NFD_KEY_PASSWORD`。同一仓库的 PR、push 和标签构建在 Secrets 可用时使用正式密钥签名；Fork PR 拿不到 Secrets，仍回退为调试签名。从已发布的调试签名版本（如 v0.3.0 及更早）改装正式签名包时，需要先卸载再安装。
 3. 先打预发布标签验证：
 
    ```bash
