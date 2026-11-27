@@ -46,6 +46,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
       - name: Install aria2c for download regression tests
         run: sudo apt-get install -y aria2
       - name: Build runtime and APK

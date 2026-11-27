@@ -56,6 +56,9 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Release signing key (optional)
         env:
           KEYSTORE_BASE64: ${{ secrets.NFD_KEYSTORE_BASE64 }}
