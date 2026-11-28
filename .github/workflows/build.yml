@@ -9,6 +9,15 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to publish after verifying its source matches this branch
+        type: string
+        default: ''
+      debug_signing:
+        description: Use debug signing for the Termux Android APKs
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: v
+        env:
+          REQUESTED_TAG: ${{ inputs.release_tag }}
         run: |
           version="$(tr -d ' \r\n' < VERSION)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::VERSION must be X.Y.Z, got '$version'"; exit 1; }
@@ -35,6 +46,13 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
+          elif [ -n "$REQUESTED_TAG" ]; then
+            [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || exit 1
+            git fetch --no-tags origin "refs/tags/$REQUESTED_TAG"
+            git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/build.yml'
+            tag="$REQUESTED_TAG"
+          fi
+          if [ -n "${tag:-}" ]; then
             case "${tag#v}" in
               "$version") echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
               "$version"-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
@@ -60,7 +78,7 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Release signing key (optional)
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: needs.version.outputs.tag != '' && !inputs.debug_signing
         env:
           KEYSTORE_BASE64: ${{ secrets.NFD_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.NFD_KEYSTORE_PASSWORD }}
@@ -227,11 +245,12 @@ jobs:
           if ($p.ExitCode -ne 0 -or -not (Select-String -Path report.txt -Pattern "SELF-TEST OK" -Quiet)) { exit 1 }
 
   embedded-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: version
+    if: needs.version.outputs.tag != ''
     uses: ./.github/workflows/embedded-android.yml
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.version.outputs.tag != ''
     needs: [version, android, termux, desktop, embedded-release]
     runs-on: ubuntu-latest
     permissions:
