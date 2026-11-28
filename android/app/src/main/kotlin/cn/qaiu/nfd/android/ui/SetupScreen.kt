@@ -341,6 +341,7 @@ private fun DownloadSettings(state: UiState, viewModel: MainViewModel, pickFolde
 @Composable
 private fun AuthSettings(state: UiState, viewModel: MainViewModel) {
     var editing by remember { mutableStateOf<AuthProvider?>(null) }
+    var webLogin by remember { mutableStateOf<Pair<AuthProvider, WebLogin>?>(null) }
     val online = state.connection is Connection.Online
     LaunchedEffect(online) {
         if (online && state.auths == null) viewModel.loadAuths()
@@ -376,9 +377,18 @@ private fun AuthSettings(state: UiState, viewModel: MainViewModel) {
                             color = if (provider.configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    val login = WebLogin.entries.firstOrNull { it.type == provider.type }
+                    if (login != null && viewModel.canSaveWebLogin()) {
+                        TextButton(onClick = { webLogin = provider to login }) { Text("网页登录") }
+                    }
                     TextButton(onClick = { editing = provider }) { Text(if (provider.configured) "修改" else "填写") }
                 }
             }
+        }
+    }
+    webLogin?.let { (provider, login) ->
+        WebLoginDialog(provider.name, login, onDismiss = { webLogin = null }) { credential, result ->
+            viewModel.saveWebLogin(login.type, login.field, credential, result)
         }
     }
     editing?.let { provider ->

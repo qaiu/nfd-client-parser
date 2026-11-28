@@ -11,6 +11,7 @@ import cn.qaiu.nfd.android.daemon.Entry
 import cn.qaiu.nfd.android.daemon.Health
 import cn.qaiu.nfd.android.daemon.Listing
 import cn.qaiu.nfd.android.daemon.Task
+import cn.qaiu.nfd.android.daemon.webLoginClient
 import cn.qaiu.nfd.android.history.HistoryItem
 import cn.qaiu.nfd.android.runtime.ParserService
 import cn.qaiu.nfd.android.termux.BootstrapService
@@ -348,6 +349,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveAuth(type: String, fields: Map<String, String>) = launchAction {
         mutable.update { it.copy(auths = daemon.saveAuth(type, fields), message = "已保存登录信息") }
+    }
+
+    fun canSaveWebLogin(): Boolean = app.prefs.endpoint.localLoginEndpoint() != null
+
+    fun saveWebLogin(type: String, field: String, credential: String, onResult: (Boolean) -> Unit) {
+        val target = app.prefs.endpoint.localLoginEndpoint()
+        if (target == null) {
+            onResult(false)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val auths = webLoginClient(target).saveAuth(type, mapOf(field to credential))
+                mutable.update { it.copy(auths = auths, message = "已保存网页登录信息") }
+                onResult(true)
+            } catch (_: DaemonException) {
+                onResult(false)
+            }
+        }
     }
 
     fun clearAuth(type: String) = launchAction {

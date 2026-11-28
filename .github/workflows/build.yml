@@ -72,6 +72,11 @@ jobs:
             exit 0
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          if ! keytool -certreq -keystore "$RUNNER_TEMP/release.jks" -alias "$KEY_ALIAS" \
+            -storepass:env KEYSTORE_PASSWORD -keypass:env KEY_PASSWORD -file "$RUNNER_TEMP/nfd-key-check.csr"; then
+            echo "::warning::The configured Android signing key could not be opened. Using a CI debug key."
+            exit 0
+          fi
           {
             echo "NFD_KEYSTORE_FILE=$RUNNER_TEMP/release.jks"
             echo "NFD_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
@@ -221,9 +226,13 @@ jobs:
           Get-Content report.txt
           if ($p.ExitCode -ne 0 -or -not (Select-String -Path report.txt -Pattern "SELF-TEST OK" -Quiet)) { exit 1 }
 
+  embedded-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/embedded-android.yml
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [version, android, termux, desktop]
+    needs: [version, android, termux, desktop, embedded-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -233,7 +242,6 @@ jobs:
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      APK_SIGNED: ${{ secrets.NFD_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
@@ -248,14 +256,14 @@ jobs:
           cat > ../notes.md <<EOF
           NFD Client $VERSION（parser 10.2.6）。安装说明与架构对照见 README。
 
-          - Android：按 CPU 选择 \`nfd-android-$VERSION-<abi>.apk\`，不确定就装 \`universal\`。解析与下载由 Termux 中的守护进程完成，首次使用请在 App 的「连接」页按提示安装。
+          - Android 内置版：选择 \`nfd-android-embedded-$VERSION-arm64-v8a.apk\` 或 \`x86_64\`。打开 App 自动运行内置解析器，支持 aria2c 多连接下载、UC/夸克/123 网盘网页登录和蓝奏目录重新解析。打开「设置 → 查看运行日志」可查看解析、分段、下载引擎和回退信息。
+          - Android Termux 版：选择 \`nfd-android-$VERSION-<abi>.apk\`，不确定就选 \`universal\`。首次使用按 App 提示安装守护进程。
+          - 内置 APK 使用 CI 调试签名，Termux 版在发布密钥不可用时也使用 CI 调试签名。覆盖安装要求签名一致，卸载旧包前请保存下载文件与数据。
+          - 内置运行时对应源码：\`nfd-android-runtime-source.tar\`。
           - Termux 守护进程：\`nfd-termux-daemon-$VERSION.tar.gz\`（App 内已内置，单独下载仅用于手动安装）。
           - 桌面：\`NFDClient-$VERSION-<os>-<arch>\`，自带 Java 运行时，无需另装 Java。macOS 包未签名，Windows 包未签名。Windows on Arm 请使用 windows-x64 包（系统以 x64 仿真运行）。
           - 校验：\`SHA256SUMS.txt\`。
           EOF
-          if [ "$APK_SIGNED" != true ]; then
-            echo "- 注意：本次 APK 使用调试签名（仓库未配置签名密钥），仅供测试，以后换成正式签名的版本需要先卸载再安装。" >> ../notes.md
-          fi
       - name: Publish
         run: |
           flags=()

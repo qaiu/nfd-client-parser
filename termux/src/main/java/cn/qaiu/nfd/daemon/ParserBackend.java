@@ -30,10 +30,19 @@ final class ParserBackend implements ShareBackend {
     @Override
     public ShareSession.Listing list(String link, String password, ShareSession.Entry folder, int page, String cursor) {
         ShareSession session = session(link, password);
-        if (folder != null) {
-            return session.openFolder(folder, page, cursor);
+        String type = diagnosticType(session);
+        long started = System.nanoTime();
+        event("list-start " + type + " " + page);
+        try {
+            ShareSession.Listing listing = folder != null ? session.openFolder(folder, page, cursor)
+                    : page <= 1 ? session.browse() : session.list(null, page, cursor);
+            event("list-ok " + type + " " + listing.page() + " " + listing.entries().size() + " "
+                    + (listing.singleFile() ? "file" : "folder") + " " + millis(started));
+            return listing;
+        } catch (RuntimeException ex) {
+            event("list-fail " + type + " " + millis(started));
+            throw ex;
         }
-        return page <= 1 ? session.browse() : session.list(null, page, cursor);
     }
 
     @Override
@@ -46,7 +55,30 @@ final class ParserBackend implements ShareBackend {
     @Override
     public ShareSession.DirectLink resolve(String link, String password, ShareSession.Entry entry) {
         ShareSession session = session(link, password);
-        return entry == null ? session.parseDirect() : session.resolve(entry);
+        String type = diagnosticType(session);
+        long started = System.nanoTime();
+        event("resolve-start " + type);
+        try {
+            ShareSession.DirectLink result = entry == null ? session.parseDirect() : session.resolve(entry);
+            event("resolve-ok " + type + " " + millis(started));
+            return result;
+        } catch (RuntimeException ex) {
+            event("resolve-fail " + type + " " + millis(started));
+            throw ex;
+        }
+    }
+
+    private static String diagnosticType(ShareSession session) {
+        String type = session.type();
+        return type.matches("[a-z0-9_]{1,20}") ? type : "other";
+    }
+
+    private static long millis(long started) {
+        return (System.nanoTime() - started) / 1_000_000;
+    }
+
+    private static void event(String value) {
+        System.out.println("NFD_EVENT parse " + value);
     }
 
     private ShareSession session(String link, String password) {

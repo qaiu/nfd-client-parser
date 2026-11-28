@@ -10,6 +10,8 @@ ARM64 启动器会在加载 HotSpot 前为引擎子进程关闭 Android 堆指�
 
 支持 HTTP Range 的大文件使用 aria2c 多连接下载，可在设置中调整每个任务的连接数。队列保留 aria2 的暂停和续传记录。需要 Cookie 或特殊请求头的链接，以及不支持 Range 的链接，由 Java 下载器处理。Termux 版使用 `pkg install aria2` 提供的命令。
 
+下载任务会显示实际使用的引擎、活动连接数和分段状态。UC、夸克和 123 网盘可从「设置 → 网盘账号 → 网页登录」打开官网。登录后点「保存登录」，凭据写入本机解析引擎的账号设置。连接远程守护进程时仍可手动填写。
+
 ## 构建
 
 Linux 构建机需要 JDK 21、Android SDK 35、Android NDK r27d、CMake 3.22+、Ninja 和 Go。每个 APK 只放对应架构的运行时。

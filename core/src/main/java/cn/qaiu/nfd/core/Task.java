@@ -35,6 +35,7 @@ final class Task {
     volatile String validatorUrl;
     volatile boolean aria2;
     volatile int aria2Connections;
+    final java.util.concurrent.atomic.AtomicInteger peakConnections = new java.util.concurrent.atomic.AtomicInteger();
 
     final List<Segment> segments = new ArrayList<>();
 
@@ -108,6 +109,7 @@ final class Task {
                 message == null ? "" : message,
                 destination == null ? "" : destination,
                 connections.size() + aria2Connections,
+                aria2 ? "aria2" : partPath == null ? "" : "java",
                 rangeSupported && total > 0,
                 createdAt,
                 source);

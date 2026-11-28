@@ -129,6 +129,18 @@ private fun TaskCard(task: Task, viewModel: MainViewModel, onRemove: () -> Unit,
                 }
                 TextButton(onClick = onRemove) { Text("移除") }
             }
+            val engine = when (task.downloadEngine) {
+                "aria2" -> "aria2c"
+                "java" -> "Java 下载器"
+                else -> ""
+            }
+            if (engine.isNotEmpty()) {
+                val detail = if (task.status == TaskStatus.RUNNING) {
+                    val range = if (task.resumable) "支持分段" else "单连接模式"
+                    "$engine · ${task.activeConnections} 个活动连接 · $range"
+                } else engine
+                Text(detail, style = MaterialTheme.typography.bodySmall)
+            }
             if (task.message.isNotBlank()) {
                 Text(
                     task.message,

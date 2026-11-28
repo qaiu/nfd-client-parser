@@ -293,12 +293,14 @@ public final class DownloadManager implements AutoCloseable {
 
     private void run(Task task) {
         TaskStatus result;
+        task.peakConnections.set(0);
         try {
             result = new TransferRunner(task, options, segmentPool, this).run();
         } catch (RuntimeException ex) {
             task.message = "内部错误：" + TransferRunner.describe(ex);
             result = TaskStatus.FAILED;
         }
+        options.event(task, "done " + result.name() + " " + task.peakConnections.get());
         boolean removed;
         synchronized (lock) {
             task.runner = null;
@@ -448,6 +450,7 @@ public final class DownloadManager implements AutoCloseable {
         int readTimeoutMillis = 30_000;
         String userAgent = DEFAULT_USER_AGENT;
         LinkRefresher refresher;
+        java.util.function.Consumer<String> diagnostics = line -> {};
         Path aria2;
         Path aria2Ca;
         boolean resumeOnStart;
@@ -511,6 +514,15 @@ public final class DownloadManager implements AutoCloseable {
             return this;
         }
 
+        public Options diagnostics(java.util.function.Consumer<String> sink) {
+            diagnostics = java.util.Objects.requireNonNull(sink);
+            return this;
+        }
+
+        void event(Task task, String event) {
+            diagnostics.accept("NFD_EVENT download " + task.id + " " + event);
+        }
+
         Options copy() {
             Options copy = new Options();
             copy.stateDir = stateDir;
@@ -523,6 +535,7 @@ public final class DownloadManager implements AutoCloseable {
             copy.readTimeoutMillis = readTimeoutMillis;
             copy.userAgent = userAgent;
             copy.refresher = refresher;
+            copy.diagnostics = diagnostics;
             copy.aria2 = aria2;
             copy.aria2Ca = aria2Ca;
             copy.resumeOnStart = resumeOnStart;

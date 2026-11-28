@@ -24,23 +24,24 @@ final class Aria2Transfer {
 
     private Aria2Transfer() {}
 
-    static boolean eligible(Task task, DownloadManager.Options options) {
-        if (options.aria2 == null || !task.rangeSupported
-                || (!task.aria2 && (task.downloaded() != 0 || options.connections < 2
-                || task.total < 2 * splitSize(options) * 1024 * 1024))
-                || !safeLine(task.url) || !safeLine(task.partPath.getFileName().toString())) {
-            return false;
-        }
+    static String skipReason(Task task, DownloadManager.Options options) {
+        if (options.aria2 == null) return "unavailable";
+        if (!task.rangeSupported) return "no-range";
+        if (!task.aria2 && task.downloaded() != 0) return "existing-progress";
+        if (!task.aria2 && options.connections < 2) return "single-connection";
+        if (!task.aria2 && task.total < 2 * splitSize(options) * 1024 * 1024) return "small-file";
+        if (!safeLine(task.url) || !safeLine(task.partPath.getFileName().toString())) return "unsupported-input";
         try {
             URL url = new URL(task.url);
             if (!(url.getProtocol().equals("http") || url.getProtocol().equals("https")) || url.getUserInfo() != null) {
-                return false;
+                return "unsupported-input";
             }
         } catch (MalformedURLException ex) {
-            return false;
+            return "unsupported-input";
         }
         return task.headers.entrySet().stream().allMatch(header ->
-                PUBLIC_HEADERS.contains(header.getKey().toLowerCase(Locale.ROOT)) && safeLine(header.getValue()));
+                PUBLIC_HEADERS.contains(header.getKey().toLowerCase(Locale.ROOT)) && safeLine(header.getValue()))
+                ? null : "special-headers";
     }
 
     static Path controlFile(Path part) {
@@ -91,6 +92,7 @@ final class Aria2Transfer {
                 if (process.waitFor(100, TimeUnit.MILLISECONDS)) {
                     boolean complete = process.exitValue() == 0 && !Files.exists(controlFile(part))
                             && Files.size(part) == task.total;
+                    options.event(task, "aria2-exit " + process.exitValue());
                     if (complete) {
                         progress.done.set(task.total);
                     }
@@ -99,6 +101,7 @@ final class Aria2Transfer {
             }
             return false;
         } catch (IOException ex) {
+            options.event(task, "aria2-io");
             return false;
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -133,6 +136,7 @@ final class Aria2Transfer {
                 if (match.matches() && Long.parseLong(match.group(2)) == task.total) {
                     progress.done.accumulateAndGet(Long.parseLong(match.group(1)), Math::max);
                     task.aria2Connections = Integer.parseInt(match.group(3));
+                    task.peakConnections.accumulateAndGet(task.aria2Connections, Math::max);
                 }
             }
         } catch (IOException | NumberFormatException ignored) {

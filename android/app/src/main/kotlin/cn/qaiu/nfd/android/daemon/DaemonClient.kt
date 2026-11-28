@@ -1,6 +1,7 @@
 package cn.qaiu.nfd.android.daemon
 
 import java.io.IOException
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,7 +19,21 @@ class DaemonException(val kind: Kind, message: String) : Exception(message) {
 
 data class Endpoint(val host: String, val port: Int, val token: String) {
     val baseUrl: String get() = "http://${if (host.contains(':')) "[$host]" else host}:$port"
+
+    fun localLoginEndpoint(): Endpoint? = when (host.lowercase(java.util.Locale.ROOT)) {
+        "localhost", "127.0.0.1" -> copy(host = "127.0.0.1")
+        "::1" -> copy(host = "::1")
+        else -> null
+    }
 }
+
+private val webLoginHttp = OkHttpClient.Builder()
+    .proxy(Proxy.NO_PROXY)
+    .followRedirects(false)
+    .retryOnConnectionFailure(false)
+    .build()
+
+internal fun webLoginClient(endpoint: Endpoint) = DaemonClient({ endpoint }, webLoginHttp)
 
 /** HTTP client for the Termux daemon API (see termux/src/main/java/.../DaemonServer.java). */
 class DaemonClient(
