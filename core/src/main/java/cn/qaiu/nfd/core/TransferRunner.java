@@ -83,7 +83,9 @@ final class TransferRunner {
                 if (needsProbe()) {
                     probe();
                 }
-                if (tryAria2 && Aria2Transfer.eligible(task, options)) {
+                String skip = tryAria2 ? Aria2Transfer.skipReason(task, options) : "fallback";
+                if (skip == null) {
+                    options.event(task, "aria2 " + Math.min(16, options.connections));
                     if (!task.aria2) {
                         task.aria2 = true;
                         task.replaceSegments(List.of(new Task.Segment(0, task.total - 1, 0)));
@@ -95,12 +97,14 @@ final class TransferRunner {
                     }
                     checkPaused();
                     tryAria2 = false;
+                    skip = "fallback";
                     manager.update(task, "aria2 下载未完成，切换到内置下载器");
                 }
                 if (task.aria2) {
                     discardAria2();
                     probe();
                 }
+                options.event(task, "java " + skip);
                 transfer();
                 finish();
                 return TaskStatus.COMPLETED;
@@ -236,6 +240,7 @@ final class TransferRunner {
         String lastModified = null;
         try {
             int code = code(connection);
+            options.event(task, "range " + code);
             if (code == 416) {
                 total = 0;
                 ranges = false;
@@ -515,6 +520,7 @@ final class TransferRunner {
                 }
             }
             task.connections.add(connection);
+            task.peakConnections.accumulateAndGet(task.connections.size(), Math::max);
             int code = code(connection);
             if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                 String location = connection.getHeaderField("Location");

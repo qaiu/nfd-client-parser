@@ -78,6 +78,7 @@ public final class DaemonMain {
         AuthStore auths = AuthStore.load(config.home.resolve("auths.json"));
         ShareSession.useCredentials(auths::get);
         ParserBackend backend = new ParserBackend();
+        boolean embedded = System.getenv("NFD_LOCAL_DOWNLOADS") != null;
         DownloadManager.Options options = new DownloadManager.Options()
                 .stateDir(config.home.resolve("tasks"))
                 .maxConcurrent(config.maxConcurrent)
@@ -92,9 +93,9 @@ public final class DaemonMain {
         if (aria2Path != null && Files.isExecutable(Path.of(aria2Path))) {
             options.aria2(Path.of(aria2Path), certificates == null ? null : Path.of(certificates));
         }
+        options.diagnostics(System.out::println);
         DownloadManager downloads = new DownloadManager(options);
         DaemonServer server = new DaemonServer(config, backend, downloads, auths, version());
-        boolean embedded = System.getenv("NFD_LOCAL_DOWNLOADS") != null;
         if (embedded) {
             System.out.println("NFD_RUNTIME daemon-init");
             if ("1".equals(System.getenv("NFD_VERIFY_STARTUP"))) {

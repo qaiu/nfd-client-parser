@@ -354,6 +354,7 @@ final class DaemonServer implements AutoCloseable {
                 .put("message", task.message())
                 .put("destination", task.destination())
                 .put("connections", task.connections())
+                .put("downloadEngine", task.downloadEngine())
                 .put("resumable", task.resumable())
                 .put("createdAt", task.createdAt())
                 .put("link", task.source().getOrDefault(ShareSession.SOURCE_LINK, ""));

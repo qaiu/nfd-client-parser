@@ -110,14 +110,16 @@ class DownloadManagerTest {
     void aria2DownloadsInParallelAndResumesAfterRestart() throws Exception {
         String command = System.getenv("NFD_TEST_ARIA2C");
         assumeTrue(command != null && Files.isExecutable(Path.of(command)), "Set NFD_TEST_ARIA2C to a real aria2c");
-        int size = 8 * 1024 * 1024 + 123;
+        int size = 50 * 1024 * 1024 + 123;
         server.close();
         server = new TestServer(size);
         server.chunkDelayMillis = 30;
-        var aria2Options = options().stateDir(dir.resolve("state")).aria2(Path.of(command), null);
+        var aria2Options = options().minSegmentSize(4 * 1024 * 1024)
+                .stateDir(dir.resolve("state")).aria2(Path.of(command), null);
         manager = new DownloadManager(aria2Options);
         TaskSnapshot task = enqueue("/file", "aria2.bin", Map.of());
-        await(task.id(), s -> s.downloaded() >= 1024 * 1024 && s.connections() >= 2);
+        await(task.id(), s -> s.downloadEngine().equals("aria2")
+                && s.downloaded() >= 1024 * 1024 && s.connections() >= 2);
         manager.pause(task.id());
         awaitStatus(task.id(), TaskStatus.PAUSED);
         try (var paths = Files.list(dir)) {
@@ -131,6 +133,7 @@ class DownloadManagerTest {
         server.chunkDelayMillis = 3;
         manager.resume(task.id());
         var done = awaitStatus(task.id(), TaskStatus.COMPLETED);
+        assertEquals("aria2", done.downloadEngine());
         assertArrayEquals(TestServer.content(1, size), Files.readAllBytes(Path.of(done.destination())));
         assertTrue(server.ranges.stream().anyMatch(range -> range.matches("bytes=[1-9]\\d*-\\d*")));
         assertTrue(server.bytesSent.get() < size,
@@ -145,10 +148,15 @@ class DownloadManagerTest {
         int size = 3 * 1024 * 1024 + 123;
         server.close();
         server = new TestServer(size);
-        manager = new DownloadManager(options().aria2(dir.resolve("missing-aria2c"), null));
+        var events = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        manager = new DownloadManager(options().aria2(dir.resolve("missing-aria2c"), null).diagnostics(events::add));
         var done = awaitStatus(enqueue("/file", "fallback.bin", Map.of()).id(), TaskStatus.COMPLETED);
+        assertEquals("java", done.downloadEngine());
         assertArrayEquals(TestServer.content(1, size), Files.readAllBytes(Path.of(done.destination())));
         assertEquals(2, server.ranges.stream().filter("bytes=0-0"::equals).count());
+        assertTrue(events.stream().anyMatch(event -> event.endsWith("range 206")));
+        assertTrue(events.stream().anyMatch(event -> event.endsWith("aria2-io")));
+        assertTrue(events.stream().anyMatch(event -> event.endsWith("java fallback")));
     }
 
     @Test

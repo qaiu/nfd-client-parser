@@ -22,4 +22,15 @@ class RuntimeLogTest {
         assertNull(runtimeDiagnostic("WARN parser test https://example.test/s/share"))
         assertNull(runtimeDiagnostic("Cookie: sample=value"))
     }
+
+    @Test
+    fun showsParserAndDownloaderEventsWithOnlyStructuredData() {
+        val task = "NFD_EVENT download 12345678-1234-1234-1234-123456789abc"
+        assertEquals("解析 [lz] 目录 第 2 页返回 50 项 · 20 ms", runtimeDiagnostic("NFD_EVENT parse list-ok lz 2 50 folder 20"))
+        assertEquals("下载 [12345678] 分段探测 HTTP 206", runtimeDiagnostic("$task range 206"))
+        assertEquals("下载 [12345678] Java 下载器 · 链接需要特殊请求头", runtimeDiagnostic("$task java special-headers"))
+        assertEquals("下载 [12345678] 完成 · 峰值 4 个活动连接", runtimeDiagnostic("$task done COMPLETED 4"))
+        assertNull(runtimeDiagnostic("$task aria2 4 Cookie=secret"))
+        assertNull(runtimeDiagnostic("NFD_EVENT parse resolve-ok lz 20 https://example.test/private"))
+    }
 }

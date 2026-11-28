@@ -1,6 +1,7 @@
 name: Embedded Android runtime
 
 on:
+  workflow_call:
   pull_request:
     paths:
       - 'android/**'
@@ -80,7 +81,13 @@ jobs:
           api-level: 35
           arch: x86_64
           script: android/runtime/device-smoke.sh android/app/build/outputs/apk/debug/app-x86_64-debug.apk android/app/build/outputs/apk/release/app-x86_64-release.apk
+      - name: Name embedded APK for release
+        run: |
+          version="$(tr -d ' \r\n' < VERSION)"
+          mkdir -p "$RUNNER_TEMP/embedded-release"
+          cp "android/app/build/outputs/apk/release/app-$ABI-release.apk" \
+            "$RUNNER_TEMP/embedded-release/nfd-android-embedded-$version-$ABI.apk"
       - uses: actions/upload-artifact@v6
         with:
           name: embedded-android-${{ matrix.abi }}
-          path: android/app/build/outputs/apk/release/app-*-release.apk
+          path: ${{ runner.temp }}/embedded-release/*.apk

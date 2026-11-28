@@ -122,6 +122,8 @@ data class Task(
     val message: String,
     val destination: String,
     val resumable: Boolean,
+    val downloadEngine: String,
+    val activeConnections: Int,
     val link: String,
 ) {
     companion object {
@@ -137,6 +139,8 @@ data class Task(
             message = json.optString("message"),
             destination = json.optString("destination"),
             resumable = json.optBoolean("resumable"),
+            downloadEngine = json.optString("downloadEngine"),
+            activeConnections = json.optInt("connections"),
             link = json.optString("link"),
         )
 

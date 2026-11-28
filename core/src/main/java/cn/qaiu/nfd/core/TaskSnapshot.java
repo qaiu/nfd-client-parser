@@ -21,6 +21,7 @@ public record TaskSnapshot(
         String message,
         String destination,
         int connections,
+        String downloadEngine,
         boolean resumable,
         long createdAt,
         Map<String, String> source) {
